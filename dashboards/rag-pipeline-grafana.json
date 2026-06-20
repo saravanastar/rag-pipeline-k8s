@@ -1,0 +1,158 @@
+{
+  "__inputs": [],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "9.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" }
+  ],
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Crawler",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area" },
+      "targets": [
+        {
+          "expr": "sum(increase(crawler_pages_crawled_total[1h]))",
+          "legendFormat": "Pages fetched (1h)"
+        }
+      ],
+      "title": "Pages Crawled (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 1 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [
+        {
+          "expr": "sum(increase(crawler_pages_emitted_total[1h]))",
+          "legendFormat": "Pages emitted (new/changed)"
+        }
+      ],
+      "title": "Pages Emitted — New/Changed (1h)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 },
+      "id": 101,
+      "title": "Kafka Consumer Lag",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "id": 10,
+      "options": { "tooltip": { "mode": "single" } },
+      "targets": [
+        {
+          "expr": "chunker_kafka_consumer_lag",
+          "legendFormat": "chunker lag (page.crawled)"
+        },
+        {
+          "expr": "embedding_kafka_consumer_lag",
+          "legendFormat": "embedding lag (chunk.ready)"
+        }
+      ],
+      "title": "Kafka Consumer Lag by Component",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "id": 102,
+      "title": "Embedding Service",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "id": 20,
+      "targets": [
+        {
+          "expr": "embedding_throughput_chunks_per_sec",
+          "legendFormat": "chunks/sec"
+        }
+      ],
+      "title": "Embedding Throughput (chunks/sec)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "id": 21,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(embedding_milvus_insert_latency_seconds_bucket[5m]))",
+          "legendFormat": "p99 Milvus insert latency"
+        }
+      ],
+      "title": "Milvus Insert Latency p99",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
+      "id": 103,
+      "title": "Query API",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "id": 30,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(query_api_latency_p99_seconds_bucket[5m]))",
+          "legendFormat": "p99 query latency"
+        }
+      ],
+      "title": "Query API p99 Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "id": 31,
+      "targets": [
+        {
+          "expr": "rate(query_api_requests_total[1m])",
+          "legendFormat": "requests/sec"
+        }
+      ],
+      "title": "Query API Request Rate",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["rag-pipeline", "kafka", "milvus", "keda"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "title": "RAG Pipeline",
+  "uid": "rag-pipeline-v1",
+  "version": 1
+}

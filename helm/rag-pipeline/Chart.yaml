@@ -1,0 +1,22 @@
+apiVersion: v2
+name: rag-pipeline
+description: Umbrella chart for the rag-pipeline-k8s project — Kafka, Redis, Milvus, and all application components.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  # Kafka via Strimzi operator (operator must be pre-installed)
+  # Strimzi Kafka CR is in charts/kafka/
+
+  # Redis for seen-pages hash store
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+
+  # Milvus for vector storage
+  - name: milvus
+    version: "4.x.x"
+    repository: "https://zilliztech.github.io/milvus-helm"
+    condition: milvus.enabled

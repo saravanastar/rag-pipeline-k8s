@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: query-api
+  namespace: rag
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rag.local          # override in values.yaml for prod
+      http:
+        paths:
+          - path: /query
+            pathType: Prefix
+            backend:
+              service:
+                name: query-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: query-api
+                port:
+                  number: 8000

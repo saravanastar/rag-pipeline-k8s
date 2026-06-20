@@ -1,0 +1,36 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: embedding-service
+  namespace: rag
+spec:
+  scaleTargetRef:
+    name: embedding-service
+
+  # Scale to zero when the chunk.ready topic is empty.
+  # Between crawl windows, the embedding service uses no resources.
+  minReplicaCount: 0
+  maxReplicaCount: 8
+
+  # Longer cooldown than the chunker: model load (~10s) means spinning up a new
+  # replica has overhead. We'd rather keep replicas warm for a few extra minutes
+  # than thrash on a small second wave of chunks.
+  cooldownPeriod: 180
+
+  pollingInterval: 15
+
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-cluster-kafka-bootstrap.rag.svc.cluster.local:9092
+        consumerGroup: embedding-group
+        topic: chunk.ready
+
+        # lagThreshold: 10 — higher than the chunker (5) because embedding is the
+        # bottleneck. Each replica can embed ~30 chunks/sec (CPU, MiniLM-L6-v2),
+        # so 10 messages/replica gives ~0.3s to clear the lag at steady state.
+        # This prevents over-scaling on small bursts while still reacting quickly
+        # to a full crawl batch (hundreds of chunks).
+        lagThreshold: "10"
+
+        offsetResetPolicy: latest

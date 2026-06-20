@@ -1,0 +1,186 @@
+# rag-pipeline umbrella chart values
+# Override specific sections in values-local.yaml for local dev,
+# or values-prod.yaml for production.
+
+# ---------------------------------------------------------------------------
+# Global settings shared across subcharts
+# ---------------------------------------------------------------------------
+global:
+  namespace: rag
+  imageRegistry: ""         # set to your registry prefix, e.g. "ghcr.io/yourorg"
+  imagePullSecrets: []
+
+kafka:
+  # Kafka is deployed via a Strimzi Kafka CR (not a Helm subchart).
+  # The CR is in helm/rag-pipeline/charts/kafka/templates/kafka-cluster.yaml.
+  # The Strimzi operator must be installed separately before deploying this chart.
+  bootstrapServers: "kafka-cluster-kafka-bootstrap:9092"
+  topics:
+    pageCrawled: page.crawled
+    chunkReady: chunk.ready
+
+# ---------------------------------------------------------------------------
+# Redis (Bitnami chart)
+# ---------------------------------------------------------------------------
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false          # no auth for local dev; enable in prod
+  master:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    persistence:
+      enabled: true
+      size: 1Gi
+
+# ---------------------------------------------------------------------------
+# Milvus (official Helm chart)
+# ---------------------------------------------------------------------------
+milvus:
+  enabled: true
+  cluster:
+    enabled: false          # standalone mode for local dev
+  standalone:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    persistence:
+      enabled: true
+      persistentVolumeClaim:
+        storageClass: ""    # use cluster default
+        size: 10Gi
+  etcd:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  minio:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Crawler (K8s CronJob)
+# ---------------------------------------------------------------------------
+crawler:
+  enabled: true
+  image:
+    repository: rag-pipeline/crawler
+    tag: latest
+    pullPolicy: IfNotPresent
+  schedule: "0 */6 * * *"    # every 6 hours
+  config:
+    targetSitemapUrl: "https://kubernetes.io/sitemap.xml"
+    sitemapUrlFilter: "/docs/concepts/"
+    crawlDelaySeconds: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# Chunker (K8s Deployment, KEDA-scaled)
+# ---------------------------------------------------------------------------
+chunker:
+  enabled: true
+  image:
+    repository: rag-pipeline/chunker
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1             # KEDA will override this; set as floor
+  config:
+    chunkSizeTokens: 512
+    chunkOverlapTokens: 64
+    kafkaConsumerGroup: chunker-group
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Embedding Service (K8s Deployment, KEDA-scaled)
+# ---------------------------------------------------------------------------
+embeddingService:
+  enabled: true
+  image:
+    repository: rag-pipeline/embedding-service
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1             # KEDA will override; set as floor
+  config:
+    modelName: all-MiniLM-L6-v2
+    embedBatchSize: 32
+    kafkaConsumerGroup: embedding-group
+    milvusCollection: rag_chunks
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+# ---------------------------------------------------------------------------
+# Query API (K8s Deployment)
+# ---------------------------------------------------------------------------
+queryApi:
+  enabled: true
+  image:
+    repository: rag-pipeline/query-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  config:
+    defaultTopK: 5
+    milvusCollection: rag_chunks
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  ingress:
+    enabled: true
+    host: "rag.local"         # override for prod
+    annotations: {}
+
+# ---------------------------------------------------------------------------
+# KEDA ScaledObject settings (referenced by k8s/keda/ manifests)
+# Documented here for visibility; applied via kubectl apply, not Helm.
+# ---------------------------------------------------------------------------
+keda:
+  chunker:
+    minReplicaCount: 0
+    maxReplicaCount: 4
+    lagThreshold: 5           # 1 new replica per 5 unprocessed page.crawled messages
+    cooldownPeriod: 120       # seconds; conservative to avoid thrash on bursty crawl batches
+  embeddingService:
+    minReplicaCount: 0
+    maxReplicaCount: 8
+    lagThreshold: 10          # embedding is the bottleneck; allow more lag per replica
+    cooldownPeriod: 180       # longer cooldown — model load time is ~10s, don't thrash

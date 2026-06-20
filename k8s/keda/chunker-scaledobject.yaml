@@ -1,0 +1,39 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: chunker
+  namespace: rag
+spec:
+  scaleTargetRef:
+    name: chunker
+
+  # Scale to zero between crawl runs — no work, no pods.
+  # This is the primary reason KEDA is used over HPA: HPA cannot scale to 0.
+  minReplicaCount: 0
+  maxReplicaCount: 4
+
+  # Cooldown must be long enough to drain the current batch before scale-in.
+  # 120s is conservative for a docs-scale crawl; tune down for higher-throughput.
+  cooldownPeriod: 120
+
+  # Polling interval for lag check. 15s is a reasonable default —
+  # fast enough to respond to a crawl trigger, not so fast it hammers the broker.
+  pollingInterval: 15
+
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-cluster-kafka-bootstrap.rag.svc.cluster.local:9092
+        consumerGroup: chunker-group
+        topic: page.crawled
+
+        # lagThreshold: number of unprocessed messages per replica before scaling out.
+        # 5 means: if there are 15 unprocessed pages, KEDA targets 3 replicas.
+        # Chosen to be slightly above a typical single-page processing time,
+        # so scaling is triggered quickly but not on single-message bursts.
+        lagThreshold: "5"
+
+        # offsetResetPolicy: latest means a new consumer group starts from the
+        # current end of the topic, not from the beginning. Prevents reprocessing
+        # all historical pages on the first deploy.
+        offsetResetPolicy: latest
