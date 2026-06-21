@@ -1,0 +1,123 @@
+{{- if .Values.embeddingService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embedding-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: embedding-service
+    app.kubernetes.io/component: embedding-service
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.embeddingService.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: embedding-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxUnavailable=0: keep at least one replica serving /embed during rollout.
+      # The query-api depends on this service for synchronous embedding; a gap
+      # would cause 502s from the query endpoint.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: embedding-service
+        app.kubernetes.io/component: embedding-service
+      annotations:
+        checksum/config: {{ .Values.embeddingService.config | toJson | sha256sum }}
+    spec:
+      # 90s grace period: allows the current embed batch (inference + Milvus insert
+      # + Kafka commit) to complete before the pod is force-killed.
+      # Model load at startup is ~10s; the KEDA cooldownPeriod=180s prevents a
+      # new pod from being terminated before it's had time to process any work.
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: embedding-service
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.embeddingService.image.repository }}:{{ .Values.embeddingService.image.tag }}"
+          imagePullPolicy: {{ .Values.embeddingService.image.pullPolicy }}
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: {{ .Values.kafka.bootstrapServers | quote }}
+            - name: KAFKA_TOPIC_IN
+              value: {{ .Values.kafka.topics.chunkReady | quote }}
+            - name: KAFKA_CONSUMER_GROUP
+              value: {{ .Values.embeddingService.config.kafkaConsumerGroup | quote }}
+            - name: MILVUS_HOST
+              value: {{ .Values.milvusInitJob.milvusHost | quote }}
+            - name: MILVUS_PORT
+              value: {{ .Values.milvusInitJob.milvusPort | quote }}
+            - name: MILVUS_COLLECTION
+              value: {{ .Values.embeddingService.config.milvusCollection | quote }}
+            - name: MODEL_NAME
+              value: {{ .Values.embeddingService.config.modelName | quote }}
+            - name: EMBED_BATCH_SIZE
+              value: {{ .Values.embeddingService.config.embedBatchSize | quote }}
+            - name: PROMETHEUS_PORT
+              value: "9090"
+            - name: API_PORT
+              value: "8000"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              cpu: {{ .Values.embeddingService.resources.requests.cpu }}
+              memory: {{ .Values.embeddingService.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.embeddingService.resources.limits.cpu }}
+              memory: {{ .Values.embeddingService.resources.limits.memory }}
+          # startupProbe: gives the model time to load (~10s) before liveness kicks in.
+          # Without this, liveness would restart the pod before the model finishes loading.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 18      # 18 × 5s = 90s max startup time
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 0    # startupProbe handles the delay
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+      {{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.global.imagePullSecrets | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: embedding-service
+    app.kubernetes.io/component: embedding-service
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  selector:
+    app.kubernetes.io/name: embedding-service
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

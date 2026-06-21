@@ -1,0 +1,7 @@
+sentence-transformers==3.0.1
+pymilvus==2.4.4
+confluent-kafka==2.4.0
+fastapi==0.111.1
+uvicorn[standard]==0.30.3
+pydantic==2.8.2
+prometheus-client==0.20.0

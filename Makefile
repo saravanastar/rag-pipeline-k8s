@@ -54,14 +54,13 @@ helm-diff: ## Show diff between running release and local chart (requires helm-d
 	  --values $(HELM_CHART)/values.yaml
 
 .PHONY: deploy-infra
-deploy-infra: helm-deps ## Deploy/upgrade infra + crawler + chunker (milestone 4). Embedding/query disabled.
+deploy-infra: helm-deps ## Deploy infra + crawler + chunker + embedding-service. Query API in milestone 6.
 	helm upgrade --install $(RELEASE) $(HELM_CHART) \
 	  --namespace $(NAMESPACE) --create-namespace \
 	  --values $(HELM_CHART)/values.yaml \
-	  --set embeddingService.enabled=false \
 	  --set queryApi.enabled=false \
 	  --wait --timeout 300s
-	kubectl apply -f $(KEDA_MANIFESTS)/chunker-scaledobject.yaml -n $(NAMESPACE)
+	kubectl apply -f $(KEDA_MANIFESTS)/ -n $(NAMESPACE)
 
 .PHONY: deploy
 deploy: helm-deps ## Deploy/upgrade full stack (all components)
