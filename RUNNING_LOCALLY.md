@@ -54,7 +54,33 @@ make setup
 
 ---
 
-## Step 2 — Verify everything is up
+## Step 2 — Build and load app images
+
+The app services (crawler, chunker, embedding-service, query-api) are built from
+local Dockerfiles. For a kind cluster no registry is needed — images are loaded
+directly into the cluster nodes.
+
+```bash
+make build-and-load
+```
+
+This runs `docker build` for each service then `kind load docker-image` to inject
+them into the cluster. Pods in `ImagePullBackOff` will self-heal within a minute.
+
+> **Note:** `embedding-service` downloads the `all-MiniLM-L6-v2` model (~90 MB)
+> during build and bakes it into the image. First build takes 3–5 minutes.
+> Subsequent builds use Docker layer cache and are fast.
+
+| Command | What it does |
+|---|---|
+| `make build` | Build all four images locally |
+| `make load-images` | Load already-built images into kind (no rebuild) |
+| `make build-and-load` | Build + load in one step |
+
+---
+
+## Step 3 — Verify everything is up
+
 
 ```bash
 make health     # smoke tests: Kafka Ready, topics exist, Redis PING, Milvus ready, KEDA up
@@ -82,7 +108,7 @@ embedding-service   Deployment        0     8     True
 
 ---
 
-## Step 3 — Trigger a crawl
+## Step 4 — Trigger a crawl
 
 ```bash
 make crawl
@@ -111,7 +137,7 @@ see `skipped=190 emitted=3` style output.
 
 ---
 
-## Step 4 — Query the pipeline
+## Step 5 — Query the pipeline
 
 ### Option A — via Ingress (recommended, no port-forward)
 
@@ -140,7 +166,7 @@ make query             # fires a sample question and pretty-prints the response
 
 ---
 
-## Step 5 — Observe in Grafana
+## Step 6 — Observe in Grafana
 
 ### Option A — MetalLB (recommended, gives a real IP)
 

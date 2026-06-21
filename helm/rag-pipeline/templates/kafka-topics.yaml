@@ -3,7 +3,7 @@
 # page.crawled — emitted by the crawler, consumed by the chunker.
 # 3 partitions: allows up to 3 parallel chunker replicas at max KEDA scale (maxReplicaCount=4).
 # Partition count cannot be reduced after creation; only increased.
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: page-crawled
@@ -25,7 +25,7 @@ spec:
 # 6 partitions: embedding service scales up to 8 replicas (maxReplicaCount=8),
 # but 6 partitions is a practical ceiling for a docs-scale corpus.
 # More partitions than consumer replicas is fine; fewer would starve replicas.
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: chunk-ready

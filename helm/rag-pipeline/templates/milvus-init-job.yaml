@@ -46,7 +46,7 @@ spec:
             - name: MILVUS_COLLECTION
               value: {{ .Values.embeddingService.config.milvusCollection | quote }}
             - name: EMBEDDING_DIM
-              value: {{ .Values.milvusInitJob.embeddingDim | quote }}
+              value: {{ .Values.embeddingService.config.embeddingDim | quote }}
           command:
             - sh
             - -c

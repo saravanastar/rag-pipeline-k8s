@@ -105,6 +105,28 @@ logs-milvus: ## Tail Milvus standalone logs
 logs-redis: ## Tail Redis logs
 	kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/name=redis -f
 
+# ── Image build + kind load ───────────────────────────────────────────────────
+
+IMAGE_PREFIX := rag-pipeline
+IMAGE_TAG    := latest
+
+.PHONY: build
+build: ## Build all app Docker images locally
+	docker build -t $(IMAGE_PREFIX)/crawler:$(IMAGE_TAG)           crawler/
+	docker build -t $(IMAGE_PREFIX)/chunker:$(IMAGE_TAG)           chunker/
+	docker build -t $(IMAGE_PREFIX)/embedding-service:$(IMAGE_TAG) embedding-service/
+	docker build -t $(IMAGE_PREFIX)/query-api:$(IMAGE_TAG)         query-api/
+
+.PHONY: load-images
+load-images: ## Load locally-built images into the kind cluster (no registry needed)
+	kind load docker-image $(IMAGE_PREFIX)/crawler:$(IMAGE_TAG)           --name $(CLUSTER_NAME)
+	kind load docker-image $(IMAGE_PREFIX)/chunker:$(IMAGE_TAG)           --name $(CLUSTER_NAME)
+	kind load docker-image $(IMAGE_PREFIX)/embedding-service:$(IMAGE_TAG) --name $(CLUSTER_NAME)
+	kind load docker-image $(IMAGE_PREFIX)/query-api:$(IMAGE_TAG)         --name $(CLUSTER_NAME)
+
+.PHONY: build-and-load
+build-and-load: build load-images ## Build images and load them into kind
+
 # ── Manual crawl trigger ──────────────────────────────────────────────────────
 
 .PHONY: crawl

@@ -16,7 +16,8 @@ kafka:
   # Kafka is deployed via a Strimzi Kafka CR managed by this chart.
   # The Strimzi operator must be pre-installed (see scripts/setup-local.sh).
   enabled: true
-  version: "3.7.0"
+  version: "3.9.0"
+  metadataVersion: "3.9-IV0"   # KRaft metadata version; must match Kafka version
   replicas: 1               # 1 for local dev; ≥3 for production
   bootstrapServers: "kafka-cluster-kafka-bootstrap:9092"
   # topicPartitions: base partition count. chunk.ready gets 2x this value.
@@ -146,7 +147,8 @@ embeddingService:
     pullPolicy: IfNotPresent
   replicaCount: 1             # KEDA will override; set as floor
   config:
-    modelName: all-MiniLM-L6-v2
+    modelName: all-MiniLM-L6-v2   # any sentence-transformers model name
+    embeddingDim: "384"            # must match model output dim; also used by milvus-init
     embedBatchSize: 32
     kafkaConsumerGroup: embedding-group
     milvusCollection: rag_chunks
@@ -229,4 +231,5 @@ monitoring:
 milvusInitJob:
   milvusHost: milvus-milvus   # service name from the Milvus Helm chart
   milvusPort: "19530"
-  embeddingDim: "384"         # all-MiniLM-L6-v2 output dimension
+  # embeddingDim is intentionally read from embeddingService.config.embeddingDim
+  # so there is a single source of truth — do not set it here.

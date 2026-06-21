@@ -20,14 +20,14 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*.whl
 ARG MODEL_NAME=all-MiniLM-L6-v2
 ENV SENTENCE_TRANSFORMERS_HOME=/app/models
 
-RUN python -c "
+RUN python - <<'PYEOF'
 from sentence_transformers import SentenceTransformer
 import os
-model_name = os.environ.get('MODEL_NAME', '${MODEL_NAME}')
-print(f'downloading model: {model_name}')
+model_name = os.environ.get("MODEL_NAME", "all-MiniLM-L6-v2")
+print(f"downloading model: {model_name}")
 SentenceTransformer(model_name)
-print('model download complete')
-"
+print("model download complete")
+PYEOF
 
 # ── Stage 3: runtime ──────────────────────────────────────────────────────────
 FROM python:3.11-slim

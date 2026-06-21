@@ -19,7 +19,6 @@ metadata:
   annotations:
     # Grafana sidecar respects this annotation to place the dashboard in a folder.
     grafana_folder: "RAG Pipeline"
-data:
-  rag-pipeline.json: |
-    {{- .Files.Get "dashboards/rag-pipeline-grafana.json" | indent 4 }}
+binaryData:
+  rag-pipeline.json: {{ .Files.Get "dashboards/rag-pipeline-grafana.json" | b64enc }}
 {{- end }}

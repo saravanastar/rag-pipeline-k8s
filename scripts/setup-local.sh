@@ -90,9 +90,15 @@ fi
 step "Strimzi Kafka operator"
 helm repo add strimzi https://strimzi.io/charts/ 2>/dev/null || true
 helm repo update strimzi
-if helm status strimzi-kafka-operator -n strimzi &>/dev/null; then
-  warn "Strimzi already installed — skipping"
+STRIMZI_STATUS=$(helm status strimzi-kafka-operator -n strimzi -o json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['info']['status'])" 2>/dev/null || echo "not-installed")
+if [[ "$STRIMZI_STATUS" == "deployed" ]]; then
+  warn "Strimzi already installed and deployed — skipping"
 else
+  if [[ "$STRIMZI_STATUS" != "not-installed" ]]; then
+    warn "Strimzi release is in '$STRIMZI_STATUS' state — uninstalling before reinstall"
+    helm uninstall strimzi-kafka-operator -n strimzi || true
+    sleep 5
+  fi
   info "Installing Strimzi operator ..."
   helm install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
     --namespace strimzi \
@@ -101,6 +107,20 @@ else
     --wait \
     --timeout 180s
 fi
+
+# Wait for Strimzi CRDs to be established — the operator pod being ready does
+# not guarantee the CRDs are registered yet; kubectl wait errors immediately if
+# the CRD object doesn't exist, so we poll until it appears first.
+info "Waiting for Strimzi CRDs to be established ..."
+for crd in kafkas.kafka.strimzi.io kafkatopics.kafka.strimzi.io; do
+  deadline=$((SECONDS + 120))
+  until kubectl get crd "$crd" &>/dev/null; do
+    [[ $SECONDS -ge $deadline ]] && error "Timed out waiting for CRD $crd"
+    sleep 3
+  done
+  kubectl wait --for=condition=Established crd/"$crd" --timeout=60s
+  info "CRD $crd established"
+done
 
 # ── 5. Install kube-prometheus-stack ─────────────────────────────────────────
 step "kube-prometheus-stack (Prometheus + Grafana + Alertmanager)"

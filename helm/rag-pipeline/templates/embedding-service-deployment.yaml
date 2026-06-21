@@ -54,6 +54,8 @@ spec:
               value: {{ .Values.embeddingService.config.milvusCollection | quote }}
             - name: MODEL_NAME
               value: {{ .Values.embeddingService.config.modelName | quote }}
+            - name: EMBEDDING_DIM
+              value: {{ .Values.embeddingService.config.embeddingDim | quote }}
             - name: EMBED_BATCH_SIZE
               value: {{ .Values.embeddingService.config.embedBatchSize | quote }}
             - name: PROMETHEUS_PORT

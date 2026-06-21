@@ -11,10 +11,12 @@ To migrate schema:
   2. Update milvus-init-job.yaml to recreate the collection (drop + create)
   3. Re-run the full embedding pipeline to repopulate
 """
+import os
+
 from pymilvus import CollectionSchema, DataType, FieldSchema
 
 COLLECTION_NAME = "rag_chunks"
-EMBEDDING_DIM   = 384   # all-MiniLM-L6-v2; update if model changes
+EMBEDDING_DIM   = int(os.environ.get("EMBEDDING_DIM", "384"))
 
 # Schema version: v1 (2024-01)
 FIELDS = [

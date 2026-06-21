@@ -1,55 +1,61 @@
 {{- if .Values.kafka.enabled }}
-# Strimzi Kafka cluster — single-node, no TLS, plaintext only.
-# Suitable for local kind dev. For production: replicas ≥ 3, TLS listeners,
-# persistent storage with a real StorageClass, and separate ZooKeeper nodes.
-apiVersion: kafka.strimzi.io/v1beta2
+# KafkaNodePool — defines the broker+controller nodes for the KRaft cluster.
+# Strimzi 1.0 dropped ZooKeeper; node pools are required.
+# dual-role: each node acts as both KRaft controller and Kafka broker,
+# which is the recommended topology for single-node local dev.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: kafka-cluster-dual-role
+  namespace: {{ .Release.Namespace }}
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.kafka.replicas }}
+  roles:
+    - controller
+    - broker
+  storage:
+    type: ephemeral
+---
+# Kafka CR — cluster-level config. Node pools supply replicas + storage.
+# strimzi.io/kraft and strimzi.io/node-pools annotations enable KRaft mode.
+apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: kafka-cluster
   namespace: {{ .Release.Namespace }}
+  annotations:
+    strimzi.io/kraft: enabled
+    strimzi.io/node-pools: enabled
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   kafka:
     version: {{ .Values.kafka.version }}
-    replicas: {{ .Values.kafka.replicas }}
+    metadataVersion: {{ .Values.kafka.metadataVersion | quote }}
     listeners:
-      # Plain (no auth, no TLS) listener — fine for in-cluster traffic on a local dev cluster.
       - name: plain
         port: 9092
         type: internal
         tls: false
     config:
-      # Retain messages for 24h — long enough to survive an embedding-service outage
-      # without losing chunks, short enough to not fill local storage.
       log.retention.hours: 24
-      # Reduce replica factors to 1 for local single-node cluster.
-      # Must match the topic-level replication.factor settings below.
       offsets.topic.replication.factor: 1
       transaction.state.log.replication.factor: 1
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-    storage:
-      type: ephemeral
-      # ephemeral = emptyDir; data is lost on pod restart.
-      # Acceptable for local dev (crawl re-runs restore the topic).
-      # Switch to `type: persistent-claim` with a PVC for staging/prod.
-    # JMX metrics exported via the Prometheus JMX exporter sidecar.
-    # The ConfigMap below defines which MBeans to expose and how to name them.
     metricsConfig:
       type: jmxPrometheusExporter
       valueFrom:
         configMapKeyRef:
           name: kafka-metrics-config
           key: kafka-metrics-config.yml
-  zookeeper:
-    replicas: 1
-    storage:
-      type: ephemeral
   entityOperator:
-    # The entity operator manages KafkaTopic and KafkaUser CRs automatically.
     topicOperator: {}
     userOperator: {}
 {{- end }}
