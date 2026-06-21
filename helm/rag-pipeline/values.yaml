@@ -98,6 +98,7 @@ crawler:
     targetSitemapUrl: "https://kubernetes.io/sitemap.xml"
     sitemapUrlFilter: "/docs/concepts/"
     crawlDelaySeconds: 1
+    maxPages: 500               # hard cap per run; prevents sitemap explosion in local dev
   resources:
     requests:
       cpu: 100m

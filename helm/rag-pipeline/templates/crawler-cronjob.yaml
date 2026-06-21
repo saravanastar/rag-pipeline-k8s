@@ -1,0 +1,93 @@
+{{- if .Values.crawler.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: crawler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: crawler
+    app.kubernetes.io/component: crawler
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  schedule: {{ .Values.crawler.schedule | quote }}
+  # Prevent overlapping runs: if a crawl is still running when the next one
+  # is scheduled, skip rather than launch a parallel run. Two concurrent crawlers
+  # would race on the Redis hash store and produce duplicate Kafka events.
+  concurrencyPolicy: Forbid
+  # Keep the last 3 successful and 1 failed job pods for log inspection.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      # The crawler is a finite batch job — hard-kill it after 1h if it hasn't
+      # finished. Protects against hangs on slow/unresponsive target sites.
+      activeDeadlineSeconds: 3600
+      # No retries: a crawl failure should be investigated, not silently retried.
+      # The next scheduled run will pick up any missed pages.
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: crawler
+            app.kubernetes.io/component: crawler
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: crawler
+              image: "{{ .Values.global.imageRegistry }}{{ .Values.crawler.image.repository }}:{{ .Values.crawler.image.tag }}"
+              imagePullPolicy: {{ .Values.crawler.image.pullPolicy }}
+              env:
+                - name: TARGET_SITEMAP_URL
+                  value: {{ .Values.crawler.config.targetSitemapUrl | quote }}
+                - name: SITEMAP_URL_FILTER
+                  value: {{ .Values.crawler.config.sitemapUrlFilter | quote }}
+                - name: KAFKA_BOOTSTRAP_SERVERS
+                  value: {{ .Values.kafka.bootstrapServers | quote }}
+                - name: KAFKA_TOPIC_OUT
+                  value: {{ .Values.kafka.topics.pageCrawled | quote }}
+                - name: REDIS_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: crawler-secrets
+                      key: redis-url
+                      # optional: true allows running without the secret in local dev
+                      # if REDIS_URL is baked into the image default. Set to false in prod.
+                      optional: true
+                - name: CRAWL_DELAY_SECONDS
+                  value: {{ .Values.crawler.config.crawlDelaySeconds | quote }}
+                - name: PROMETHEUS_PORT
+                  value: "9090"
+                - name: MAX_PAGES
+                  value: {{ .Values.crawler.config.maxPages | default "500" | quote }}
+              ports:
+                - name: metrics
+                  containerPort: 9090
+                  protocol: TCP
+              resources:
+                requests:
+                  cpu: {{ .Values.crawler.resources.requests.cpu }}
+                  memory: {{ .Values.crawler.resources.requests.memory }}
+                limits:
+                  cpu: {{ .Values.crawler.resources.limits.cpu }}
+                  memory: {{ .Values.crawler.resources.limits.memory }}
+          {{- if .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml .Values.global.imagePullSecrets | nindent 12 }}
+          {{- end }}
+---
+# Secret for Redis URL. In local dev, apply this manually or let the env var
+# fall back to the default in config.py.
+# In production: use External Secrets Operator or Vault Agent to populate this.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: crawler-secrets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+type: Opaque
+stringData:
+  redis-url: {{ printf "redis://rag-redis-master.%s.svc.cluster.local:6379" .Release.Namespace | quote }}
+{{- end }}

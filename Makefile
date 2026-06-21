@@ -54,11 +54,10 @@ helm-diff: ## Show diff between running release and local chart (requires helm-d
 	  --values $(HELM_CHART)/values.yaml
 
 .PHONY: deploy-infra
-deploy-infra: helm-deps ## Deploy/upgrade infra only (Kafka, Redis, Milvus) — no app pods
+deploy-infra: helm-deps ## Deploy/upgrade infra + crawler (milestone 3). Chunker/embedding/query disabled.
 	helm upgrade --install $(RELEASE) $(HELM_CHART) \
 	  --namespace $(NAMESPACE) --create-namespace \
 	  --values $(HELM_CHART)/values.yaml \
-	  --set crawler.enabled=false \
 	  --set chunker.enabled=false \
 	  --set embeddingService.enabled=false \
 	  --set queryApi.enabled=false \

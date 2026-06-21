@@ -115,12 +115,10 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 step "Helm install/upgrade"
 info "Deploying release '$RELEASE_NAME' into namespace '$NAMESPACE' ..."
 
-# Disable app deployments for now (milestone 2 = infra only).
-# Application components are enabled as they're implemented in later milestones.
+# Milestone 3: crawler enabled. Chunker/embedding/query enabled in later milestones.
 helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/rag-pipeline" \
   --namespace "$NAMESPACE" \
   --values "$REPO_ROOT/helm/rag-pipeline/values.yaml" \
-  --set crawler.enabled=false \
   --set chunker.enabled=false \
   --set embeddingService.enabled=false \
   --set queryApi.enabled=false \
