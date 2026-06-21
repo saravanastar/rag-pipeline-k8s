@@ -1,44 +1,68 @@
 # Embedding Service
 
 **Kind:** Kubernetes Deployment  
-**Scaling:** KEDA ScaledObject on `chunk.ready` Kafka consumer lag  
-**Consumes:** `chunk.ready`  
-**Writes to:** Milvus (`rag_chunks` collection)  
-**Exposes:** FastAPI endpoint for on-demand embedding (used by Query API)
+**Image size:** ~2.1 GB (includes all-MiniLM-L6-v2 model weights)  
+**Scaling:** KEDA ScaledObject — 0→8 replicas on `chunk.ready` Kafka consumer lag  
+**Consumes:** `chunk.ready` (Kafka consumer loop)  
+**Exposes:** `POST /embed` (FastAPI, used by Query API)  
+**Writes to:** Milvus `rag_chunks` collection
 
 ---
 
 ## What it does
 
-The embedding service is the centerpiece of the pipeline. It:
+The embedding service is the centerpiece of the pipeline. It runs two concurrent roles:
 
-1. Consumes `chunk.ready` events from Kafka
-2. Batches chunks and runs inference with `sentence-transformers/all-MiniLM-L6-v2`
-3. Inserts the resulting vectors + metadata into Milvus
-4. Exposes `POST /embed` for synchronous embedding requests from the Query API
+1. **Kafka consumer loop** (main thread) — batches `chunk.ready` events (up to 32 chunks OR 2s timeout), runs batch inference, inserts vectors into Milvus, commits offsets
+2. **FastAPI server** (daemon thread) — `POST /embed` for synchronous on-demand embedding from the Query API
+
+Both paths call the same `embed()` function in `embedder.py`.
+
+---
+
+## ◀ Triton swap point
+
+```python
+# embedding-service/src/embedder.py
+
+def embed(texts: list[str]) -> list[list[float]]:
+    """
+    This function is the contract.
+    Current: SentenceTransformer.encode()
+    Project 2: Triton gRPC client call
+    """
+```
+
+**To replace this service with NVIDIA Triton (Project 2), change only this function body.** The Kafka consumer, batch accumulation, Milvus write path, FastAPI endpoint, KEDA ScaledObject, Deployment manifest, and all metrics are unchanged. See the full docstring in `embedder.py` for the threading implications.
 
 ---
 
 ## Model: all-MiniLM-L6-v2
 
-- 384-dimensional dense embeddings
-- ~22M parameters, fast CPU inference (~5ms per chunk on modern hardware)
-- Well-understood quality/speed tradeoff for a general-purpose English corpus
-- Chosen for demo portability — no GPU required to run this project end-to-end
+- **384-dimensional** dense embeddings (L2-normalised → cosine similarity = dot product)
+- **~22M parameters**, ~5ms per chunk on CPU
+- **Pre-downloaded** into the Docker image at build time (3-stage Dockerfile: builder → model-downloader → runtime) — pods don't hit HuggingFace Hub at startup
 
 ---
 
-## Triton swap point
+## Batching design
 
-**The embedding call is isolated behind a single interface:**
-
-```python
-# embedding-service/src/embedder.py
-def embed(texts: list[str]) -> list[list[float]]:
-    ...
+```
+consume chunk.ready messages →
+    accumulate up to EMBED_BATCH_SIZE=32 chunks
+    OR flush after BATCH_TIMEOUT_SECONDS=2.0 if batch not full
+→ embed batch (one SentenceTransformer.encode() call)
+→ insert batch into Milvus
+→ commit batch offset (last message covers all earlier offsets)
 ```
 
-To replace this service with NVIDIA Triton (Project 2 in this series), the only change is the implementation of this function — swap `SentenceTransformer.encode()` for a Triton gRPC client call. The Kafka consumer, Milvus write path, and FastAPI endpoint are unchanged. This is intentional.
+Batch inference on 32 texts is ~4× faster than 32 individual calls due to matrix parallelism. The 2s timeout ensures chunks don't buffer indefinitely when topic lag is low (e.g. after a small crawl run).
+
+---
+
+## Delivery guarantee
+
+Same pattern as the chunker: embed → Milvus insert → Kafka commit. If the pod dies between insert and commit, the batch is redelivered and re-embedded. Milvus upserts on `chunk_id` (VARCHAR primary key) make this idempotent.
 
 ---
 
@@ -46,43 +70,63 @@ To replace this service with NVIDIA Triton (Project 2 in this series), the only 
 
 ```
 POST /embed
-Content-Type: application/json
-
 {"texts": ["chunk text 1", "chunk text 2"]}
+→ {"embeddings": [[0.12, -0.34, ...], ...], "dim": 384}
 
-→ {"embeddings": [[0.12, -0.34, ...], ...]}
+GET /health    → 200 OK only when model loaded AND Milvus reachable
+GET /metrics   → Prometheus text (port 9090)
 ```
 
-```
-GET /health → 200 OK
-GET /metrics → Prometheus text format
-```
+`/health` is the target for `startupProbe`, `livenessProbe`, and `readinessProbe` in the Deployment manifest. The startup probe gives the pod up to 90s (18 × 5s) to load the model before liveness takes over.
 
 ---
 
-## KEDA scaling
+## Milvus collection schema
 
-See `k8s/keda/embedding-scaledobject.yaml`. Scales 0→8 replicas based on lag on `chunk.ready`. `lagThreshold: 10` — the embedding service is the bottleneck; allow more lag before scaling to avoid thrashing.
-
----
-
-## Milvus collection
-
-Collection schema is defined in `embedding-service/src/milvus_schema.py` — not created ad hoc at runtime. See `helm/rag-pipeline/charts/milvus-init/` for the init job that applies the schema on first deploy.
-
-Collection: `rag_chunks`
+Defined authoritatively in `src/milvus_schema.py` — not created ad hoc. The Helm `post-install` hook (`milvus-init-job.yaml`) applies the schema on first deploy and on upgrades.
 
 | Field | Type | Description |
 |---|---|---|
-| `chunk_id` | VARCHAR(64) | Primary key (UUID) |
+| `chunk_id` | VARCHAR(64), PK | UUID v4 |
 | `url` | VARCHAR(2048) | Source page URL |
+| `title` | VARCHAR(512) | Page title |
 | `chunk_index` | INT64 | Position within the page |
+| `total_chunks` | INT64 | Total chunks for this page |
 | `text` | VARCHAR(4096) | Raw chunk text |
 | `content_hash` | VARCHAR(64) | SHA-256 of source page |
-| `embedding` | FLOAT_VECTOR(384) | The dense vector |
 | `created_at` | INT64 | Unix timestamp |
+| `embedding` | FLOAT_VECTOR(384) | L2-normalised dense vector |
 
-Index: IVF_FLAT with `nlist=128` (suitable for <500K vectors; switch to HNSW at scale).
+**Index:** IVF_FLAT, COSINE metric, `nlist=128`. Good recall at <500K vectors. Switch to HNSW at larger scale.
+
+---
+
+## KEDA ScaledObject
+
+```yaml
+# k8s/keda/embedding-scaledobject.yaml
+minReplicaCount: 0      # scale to zero between crawl windows
+maxReplicaCount: 8
+lagThreshold: "10"      # higher than chunker (5) — embedding is the bottleneck
+cooldownPeriod: 180     # longer than chunker (120) — model load ~10s, avoid thrash
+```
+
+`chunk.ready` has 6 partitions, so at most 6 replicas actively consume. Replicas 7–8 are available for burst headroom if partitions are rebalanced.
+
+---
+
+## Source files
+
+| File | Role |
+|---|---|
+| `src/embedder.py` | ◀ Triton swap point — `load_model()` + `embed()` with threading.Lock |
+| `src/milvus_schema.py` | Collection schema v1 (authoritative definition) |
+| `src/milvus_client.py` | `MilvusClient` — batch insert + ANN search |
+| `src/consumer.py` | `ChunkReadyConsumer` — batch iterator (size OR timeout), SIGTERM-safe |
+| `src/api.py` | FastAPI `POST /embed` + `GET /health` |
+| `src/main.py` | Dual-thread startup; model loaded before API starts so /health=200 means ready |
+| `src/config.py` | Typed Config from env vars |
+| `src/metrics.py` | Throughput, inference latency, Milvus insert latency, batch size histograms |
 
 ---
 
@@ -96,16 +140,8 @@ Index: IVF_FLAT with `nlist=128` (suitable for <500K vectors; switch to HNSW at 
 | `MILVUS_HOST` | `milvus` | Milvus host |
 | `MILVUS_PORT` | `19530` | Milvus gRPC port |
 | `MILVUS_COLLECTION` | `rag_chunks` | Target collection |
-| `EMBED_BATCH_SIZE` | `32` | Chunks per inference batch |
 | `MODEL_NAME` | `all-MiniLM-L6-v2` | sentence-transformers model |
+| `EMBED_BATCH_SIZE` | `32` | Max chunks per inference call |
+| `BATCH_TIMEOUT_SECONDS` | `2.0` | Flush partial batches after this delay |
+| `API_PORT` | `8000` | FastAPI port |
 | `PROMETHEUS_PORT` | `9090` | Metrics port |
-
----
-
-## Metrics
-
-- `embedding_chunks_embedded_total` — total chunks embedded and inserted
-- `embedding_throughput_chunks_per_sec` — rolling 60s throughput
-- `embedding_inference_latency_seconds` — histogram of model inference time
-- `embedding_milvus_insert_latency_seconds` — histogram of Milvus insert time
-- `embedding_kafka_consumer_lag` — current lag on `chunk.ready`
