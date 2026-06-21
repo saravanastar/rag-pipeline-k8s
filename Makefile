@@ -145,6 +145,22 @@ port-redis: ## Forward Redis to localhost:6379
 port-query: ## Forward query-api to localhost:8000
 	kubectl port-forward svc/query-api 8000:8000 -n $(NAMESPACE)
 
+.PHONY: port-prometheus
+port-prometheus: ## Forward Prometheus UI to localhost:9090 (http://localhost:9090)
+	kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 -n monitoring
+
+.PHONY: port-grafana
+port-grafana: ## Forward Grafana to localhost:3000 (admin/admin)
+	kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring
+
+.PHONY: import-dashboard
+import-dashboard: ## Import the RAG pipeline Grafana dashboard via the API
+	@echo "Importing dashboard (requires port-grafana to be running) ..."
+	@curl -s -X POST http://admin:admin@localhost:3000/api/dashboards/import \
+	  -H "Content-Type: application/json" \
+	  -d "{\"dashboard\": $$(cat dashboards/rag-pipeline-grafana.json), \"overwrite\": true, \"folderId\": 0}" \
+	  | python3 -m json.tool
+
 # ── Help ──────────────────────────────────────────────────────────────────────
 
 .PHONY: help

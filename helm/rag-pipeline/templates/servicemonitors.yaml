@@ -1,0 +1,147 @@
+{{- if .Values.monitoring.enabled }}
+# ── Chunker ──────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: chunker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: chunker
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    # This label is how kube-prometheus-stack discovers ServiceMonitors.
+    # Must match the `serviceMonitorSelector` in the Prometheus CR.
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chunker
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval }}
+---
+# ── Embedding Service ─────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: embedding-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: embedding-service
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: embedding-service
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval }}
+---
+# ── Query API ─────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: query-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: query-api
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: query-api
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval }}
+---
+# ── Kafka (Strimzi JMX exporter) ─────────────────────────────────────────────
+# Strimzi exposes JMX metrics on a headless service named <cluster>-kafka-brokers.
+# The exporter runs as a sidecar on each broker pod and serves on port 9404.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka-brokers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: kafka-cluster
+      strimzi.io/kind: Kafka
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  podMetricsEndpoints:
+    - port: tcp-prometheus
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval }}
+---
+# ── Redis (redis_exporter sidecar) ───────────────────────────────────────────
+# Bitnami Redis with metrics.enabled=true adds a redis_exporter container
+# and a <release>-redis-metrics Service on port 9121.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval }}
+---
+# ── Milvus ────────────────────────────────────────────────────────────────────
+# Milvus standalone exposes Prometheus metrics on port 9091 by default.
+# The Milvus Helm chart creates a <release>-milvus service; we scrape port 9091.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: milvus
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: milvus
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: milvus
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval }}
+      # Milvus metric names use proxy_ prefix for its internal components.
+      # relabelings here keep only the labels we care about.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+{{- end }}

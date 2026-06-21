@@ -36,6 +36,14 @@ spec:
       # ephemeral = emptyDir; data is lost on pod restart.
       # Acceptable for local dev (crawl re-runs restore the topic).
       # Switch to `type: persistent-claim` with a PVC for staging/prod.
+    # JMX metrics exported via the Prometheus JMX exporter sidecar.
+    # The ConfigMap below defines which MBeans to expose and how to name them.
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics-config
+          key: kafka-metrics-config.yml
   zookeeper:
     replicas: 1
     storage:

@@ -45,6 +45,12 @@ redis:
     persistence:
       enabled: true
       size: 1Gi
+  # redis_exporter sidecar — exposes Redis INFO metrics on :9121/metrics.
+  # Scraped by the redis ServiceMonitor below.
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: false    # we manage the ServiceMonitor ourselves for label consistency
 
 # ---------------------------------------------------------------------------
 # Milvus (official Helm chart)
@@ -193,6 +199,29 @@ keda:
     maxReplicaCount: 8
     lagThreshold: 10          # embedding is the bottleneck; allow more lag per replica
     cooldownPeriod: 180       # longer cooldown — model load time is ~10s, don't thrash
+
+# ---------------------------------------------------------------------------
+# Monitoring — ServiceMonitors, PodMonitor, PrometheusRules
+# Requires kube-prometheus-stack to be installed in the cluster.
+# ---------------------------------------------------------------------------
+monitoring:
+  enabled: true
+  # Prometheus scrape interval for all app services.
+  scrapeInterval: "30s"
+  # Label that kube-prometheus-stack uses to discover ServiceMonitors.
+  # Must match the prometheusSelector in the Prometheus CR (default: release=kube-prometheus-stack).
+  prometheusRelease: "kube-prometheus-stack"
+  alerts:
+    # Kafka consumer lag alert: fires when lag stays above threshold for > 5 min.
+    # Set to 2× the KEDA lagThreshold so the alert fires before KEDA hits maxReplicaCount.
+    chunkerLagCritical: 20        # 2× keda.chunker.lagThreshold (5) × maxReplicaCount (4)
+    embeddingLagCritical: 80      # 2× keda.embeddingService.lagThreshold (10) × maxReplicaCount (8)
+    # Query API p99 latency alert threshold in seconds.
+    queryLatencyP99Critical: 0.5
+    # Milvus insert p99 latency alert threshold.
+    milvusInsertLatencyP99Critical: 1.0
+    # Error rate threshold (errors / total requests).
+    queryErrorRateCritical: 0.05  # 5%
 
 # ---------------------------------------------------------------------------
 # Milvus init job settings

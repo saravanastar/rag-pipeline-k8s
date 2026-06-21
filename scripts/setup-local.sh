@@ -97,13 +97,36 @@ else
     --timeout 180s
 fi
 
-# ── 5. Add Helm repos for app dependencies ───────────────────────────────────
+# ── 5. Install kube-prometheus-stack ─────────────────────────────────────────
+step "kube-prometheus-stack (Prometheus + Grafana + Alertmanager)"
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
+helm repo update prometheus-community
+if helm status kube-prometheus-stack -n monitoring &>/dev/null; then
+  warn "kube-prometheus-stack already installed — skipping"
+else
+  info "Installing kube-prometheus-stack ..."
+  helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+    --namespace monitoring \
+    --create-namespace \
+    --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+    --set prometheus.prometheusSpec.ruleSelectorNilUsesHelmValues=false \
+    --set grafana.adminPassword=admin \
+    --set grafana.persistence.enabled=false \
+    --wait \
+    --timeout 300s
+  # The three *SelectorNilUsesHelmValues=false flags tell Prometheus to discover
+  # ALL ServiceMonitors/PodMonitors/Rules in the cluster, not just ones with
+  # the Helm release label. Required when app monitors are in a different namespace.
+fi
+
+# ── 6a. Add Helm repos for app dependencies ───────────────────────────────────
 step "Helm repos"
 helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
 helm repo add milvus  https://zilliztech.github.io/milvus-helm 2>/dev/null || true
 helm repo update
 
-# ── 6. Update umbrella chart dependencies ───────────────────────────────────
+# ── 6b. Update umbrella chart dependencies ───────────────────────────────────
 step "Helm dependency update"
 helm dependency update "$REPO_ROOT/helm/rag-pipeline"
 

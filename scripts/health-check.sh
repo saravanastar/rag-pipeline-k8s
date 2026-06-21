@@ -141,6 +141,33 @@ else
   warn "Check: kubectl get pods -n keda"
 fi
 
+# ── Prometheus / Grafana ──────────────────────────────────────────────────────
+section "kube-prometheus-stack"
+
+PROM_READY=$(kubectl get deployment kube-prometheus-stack-prometheus -n monitoring \
+  -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "")
+if [[ -n "$PROM_READY" ]] && [[ "${PROM_READY}" -ge 1 ]]; then
+  pass "Prometheus is running (${PROM_READY} ready)"
+else
+  # Use StatefulSet path — kube-prometheus-stack deploys Prometheus as a StatefulSet
+  PROM_SS=$(kubectl get statefulset prometheus-kube-prometheus-stack-prometheus -n monitoring \
+    -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+  if [[ "${PROM_SS}" -ge 1 ]]; then
+    pass "Prometheus StatefulSet is running (${PROM_SS} ready)"
+  else
+    warn "Prometheus not found in 'monitoring' namespace — run 'make setup' to install kube-prometheus-stack"
+  fi
+fi
+
+SM_COUNT=$(kubectl get servicemonitor -n "$NAMESPACE" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+PM_COUNT=$(kubectl get podmonitor -n "$NAMESPACE" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+RULE_COUNT=$(kubectl get prometheusrule -n "$NAMESPACE" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+if [[ "${SM_COUNT}" -ge 1 ]] || [[ "${PM_COUNT}" -ge 1 ]]; then
+  pass "ServiceMonitors: ${SM_COUNT}, PodMonitors: ${PM_COUNT}, PrometheusRules: ${RULE_COUNT}"
+else
+  warn "No ServiceMonitors found in '$NAMESPACE' — deploy the Helm chart with monitoring.enabled=true"
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 echo "──────────────────────────────────────────"

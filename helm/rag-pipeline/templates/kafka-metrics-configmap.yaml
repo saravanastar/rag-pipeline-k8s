@@ -1,0 +1,59 @@
+{{- if .Values.kafka.enabled }}
+# Strimzi reads this ConfigMap to configure the Kafka JMX → Prometheus exporter.
+# Rules are evaluated top-to-bottom; first match wins.
+# Exposes: consumer group lag, topic byte rates, broker request rates.
+# Full rule reference: https://strimzi.io/docs/operators/latest/configuring.html#assembly-metrics-str
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    rules:
+      # Consumer group lag — the primary KEDA trigger signal.
+      # kafka_consumer_lag{consumergroup, topic, partition}
+      - pattern: kafka.server<type=FetcherLagMetrics, name=ConsumerLag, clientId=(.+), topic=(.+), partition=(.+)><>Value
+        name: kafka_consumer_lag
+        labels:
+          clientid: "$1"
+          topic: "$2"
+          partition: "$3"
+
+      # Topic byte rates — ingress/egress per topic.
+      - pattern: kafka.server<type=BrokerTopicMetrics, name=(BytesInPerSec|BytesOutPerSec), topic=(.+)><>OneMinuteRate
+        name: kafka_topic_$1_rate
+        labels:
+          topic: "$2"
+
+      # Messages in per second per topic.
+      - pattern: kafka.server<type=BrokerTopicMetrics, name=MessagesInPerSec, topic=(.+)><>OneMinuteRate
+        name: kafka_topic_messages_in_per_sec
+        labels:
+          topic: "$1"
+
+      # Under-replicated partitions — should be 0; > 0 signals a broker problem.
+      - pattern: kafka.server<type=ReplicaManager, name=UnderReplicatedPartitions><>Value
+        name: kafka_server_under_replicated_partitions
+
+      # Active controller count — should always be 1.
+      - pattern: kafka.controller<type=KafkaController, name=ActiveControllerCount><>Value
+        name: kafka_controller_active_count
+
+      # Request total rate (all request types).
+      - pattern: kafka.network<type=RequestMetrics, name=RequestsPerSec, request=(.+)><>OneMinuteRate
+        name: kafka_network_requests_per_sec
+        labels:
+          request: "$1"
+
+      # Log size per topic-partition (disk usage proxy).
+      - pattern: kafka.log<type=Log, name=Size, topic=(.+), partition=(.+)><>Value
+        name: kafka_log_size_bytes
+        labels:
+          topic: "$1"
+          partition: "$2"
+{{- end }}

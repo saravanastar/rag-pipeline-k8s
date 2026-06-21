@@ -1,0 +1,143 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rag-pipeline
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  groups:
+    # ── Kafka consumer lag ─────────────────────────────────────────────────
+    - name: kafka.lag
+      rules:
+        - alert: ChunkerKafkaLagCritical
+          # Fires when the chunker's page.crawled lag exceeds the critical threshold
+          # for 5 minutes — meaning KEDA has likely already scaled to maxReplicaCount
+          # but still can't drain the queue. Indicates a chunker bug or topic misconfiguration.
+          expr: chunker_kafka_consumer_lag > {{ .Values.monitoring.alerts.chunkerLagCritical }}
+          for: 5m
+          labels:
+            severity: critical
+            component: chunker
+          annotations:
+            summary: "Chunker Kafka lag is critically high"
+            description: >
+              chunker_kafka_consumer_lag is {{ "{{" }} $value {{ "}}" }} (threshold: {{ .Values.monitoring.alerts.chunkerLagCritical }}).
+              KEDA is at or near maxReplicaCount={{ .Values.keda.chunker.maxReplicaCount }}.
+              Check chunker pod logs: kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=chunker
+
+        - alert: EmbeddingKafkaLagCritical
+          # Same pattern for the embedding service on chunk.ready.
+          # Higher threshold: embedding is deliberately allowed more lag per replica (lagThreshold=10).
+          expr: embedding_kafka_consumer_lag > {{ .Values.monitoring.alerts.embeddingLagCritical }}
+          for: 5m
+          labels:
+            severity: critical
+            component: embedding-service
+          annotations:
+            summary: "Embedding service Kafka lag is critically high"
+            description: >
+              embedding_kafka_consumer_lag is {{ "{{" }} $value {{ "}}" }} (threshold: {{ .Values.monitoring.alerts.embeddingLagCritical }}).
+              Check embedding-service pod logs: kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=embedding-service
+
+    # ── Query API latency ──────────────────────────────────────────────────
+    - name: query.latency
+      rules:
+        - alert: QueryApiHighP99Latency
+          # p99 query latency > 500ms sustained for 5 min.
+          # Target is <50ms (embed ~10ms + Milvus search ~20ms); 500ms means
+          # something is badly wrong (Milvus index not loaded, embedding-service overloaded).
+          expr: >
+            histogram_quantile(0.99,
+              rate(query_api_latency_seconds_bucket[5m])
+            ) > {{ .Values.monitoring.alerts.queryLatencyP99Critical }}
+          for: 5m
+          labels:
+            severity: warning
+            component: query-api
+          annotations:
+            summary: "Query API p99 latency is above {{ .Values.monitoring.alerts.queryLatencyP99Critical }}s"
+            description: >
+              p99 query latency is {{ "{{" }} $value | humanizeDuration {{ "}}" }}.
+              Check: (1) embedding-service /health, (2) Milvus collection load status,
+              (3) kubectl top pods -n {{ .Release.Namespace }}
+
+        - alert: QueryApiHighErrorRate
+          # Error rate (HTTP 4xx/5xx from /query) > 5% over a 5-minute window.
+          expr: >
+            rate(query_api_requests_total{status="error"}[5m])
+            /
+            rate(query_api_requests_total[5m])
+            > {{ .Values.monitoring.alerts.queryErrorRateCritical }}
+          for: 2m
+          labels:
+            severity: critical
+            component: query-api
+          annotations:
+            summary: "Query API error rate above {{ .Values.monitoring.alerts.queryErrorRateCritical | mul 100 }}%"
+            description: >
+              {{ "{{" }} $value | humanizePercentage {{ "}}" }} of queries are failing.
+              Check: kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=query-api
+
+    # ── Milvus insert latency ──────────────────────────────────────────────
+    - name: milvus.latency
+      rules:
+        - alert: MilvusInsertLatencyHigh
+          expr: >
+            histogram_quantile(0.99,
+              rate(embedding_milvus_insert_latency_seconds_bucket[5m])
+            ) > {{ .Values.monitoring.alerts.milvusInsertLatencyP99Critical }}
+          for: 5m
+          labels:
+            severity: warning
+            component: milvus
+          annotations:
+            summary: "Milvus insert p99 latency above {{ .Values.monitoring.alerts.milvusInsertLatencyP99Critical }}s"
+            description: >
+              p99 Milvus insert latency is {{ "{{" }} $value | humanizeDuration {{ "}}" }}.
+              Possible causes: Milvus flush backpressure, node memory pressure, PVC throughput limit.
+              Check: kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=milvus
+
+    # ── Embedding throughput ───────────────────────────────────────────────
+    - name: embedding.throughput
+      rules:
+        - alert: EmbeddingThroughputZero
+          # The embedding service is running but not embedding anything.
+          # Fires only when there IS Kafka lag (work to do) but throughput is zero —
+          # distinguishes "idle between crawls" from "stuck".
+          expr: >
+            embedding_throughput_chunks_per_sec == 0
+            and
+            embedding_kafka_consumer_lag > 0
+          for: 10m
+          labels:
+            severity: warning
+            component: embedding-service
+          annotations:
+            summary: "Embedding service has Kafka lag but zero throughput"
+            description: >
+              Chunks are queued on chunk.ready but the embedding service is not processing them.
+              Check for model load failure or Milvus connection issues:
+              kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=embedding-service
+
+    # ── Infrastructure health ──────────────────────────────────────────────
+    - name: infra.health
+      rules:
+        - alert: KafkaUnderReplicatedPartitions
+          # Under-replicated partitions > 0 means a broker is behind or missing.
+          # On a single-node dev cluster this fires if the broker pod restarts —
+          # acceptable in dev, not in prod.
+          expr: kafka_server_under_replicated_partitions > 0
+          for: 2m
+          labels:
+            severity: warning
+            component: kafka
+          annotations:
+            summary: "Kafka has under-replicated partitions"
+            description: >
+              {{ "{{" }} $value {{ "}}" }} partition(s) are under-replicated.
+              Check: kubectl get pods -n {{ .Release.Namespace }} -l strimzi.io/cluster=kafka-cluster
+{{- end }}

@@ -1,0 +1,30 @@
+{{- if and .Values.monitoring.enabled .Values.crawler.enabled }}
+# PodMonitor (not ServiceMonitor) because the crawler is a CronJob.
+# CronJob pods are ephemeral and have no persistent backing Service,
+# so a ServiceMonitor with a selector would never match any endpoints.
+# A PodMonitor selects pods directly by label and scrapes them while they're alive.
+#
+# The crawler's Prometheus server starts immediately and stays up for the
+# lifetime of the pod, so metrics are available during and just after each run.
+# kube-prometheus-stack will scrape whatever it can during the ~10-30 min run window.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: crawler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: crawler
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crawler
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval }}
+{{- end }}
