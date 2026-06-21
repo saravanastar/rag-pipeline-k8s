@@ -405,3 +405,7 @@ The crawler targets `kubernetes.io/docs/concepts/` — specifically the subtree 
 ## License
 
 MIT
+
+---
+
+*Built by [Saravanakumar Arunachalam](https://github.com/saravanastar) · scaffolded with Claude Code*
