@@ -1,0 +1,98 @@
+{{- if .Values.milvus.enabled }}
+# One-shot Job that creates the Milvus collection and index on first deploy.
+# Uses helm.sh/hook so it runs after Milvus is installed but before app pods start.
+# The collection schema is the authoritative definition — never created ad hoc in app code.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: milvus-init
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # post-install + post-upgrade: runs on fresh install AND when collection schema changes.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    # keep-last-1: leaves the most recent job pod for log inspection, deletes older ones.
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  # Retry up to 3 times — Milvus may not be ready immediately after the hook fires.
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for Milvus to accept connections before running the init script.
+        - name: wait-for-milvus
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.milvusInitJob.milvusHost }} {{ .Values.milvusInitJob.milvusPort }}; do
+                echo "waiting for milvus at {{ .Values.milvusInitJob.milvusHost }}:{{ .Values.milvusInitJob.milvusPort }}"
+                sleep 5
+              done
+              echo "milvus is up"
+      containers:
+        - name: milvus-init
+          image: python:3.11-slim
+          env:
+            - name: MILVUS_HOST
+              value: {{ .Values.milvusInitJob.milvusHost | quote }}
+            - name: MILVUS_PORT
+              value: {{ .Values.milvusInitJob.milvusPort | quote }}
+            - name: MILVUS_COLLECTION
+              value: {{ .Values.embeddingService.config.milvusCollection | quote }}
+            - name: EMBEDDING_DIM
+              value: {{ .Values.milvusInitJob.embeddingDim | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              pip install pymilvus==2.4.0 --quiet
+              python3 - <<'PYEOF'
+              import os, time
+              from pymilvus import connections, Collection, CollectionSchema, FieldSchema, DataType, utility
+
+              host = os.environ["MILVUS_HOST"]
+              port = int(os.environ["MILVUS_PORT"])
+              collection_name = os.environ["MILVUS_COLLECTION"]
+              dim = int(os.environ["EMBEDDING_DIM"])
+
+              print(f"connecting to milvus at {host}:{port}")
+              connections.connect(host=host, port=port)
+
+              if utility.has_collection(collection_name):
+                  print(f"collection '{collection_name}' already exists — skipping create")
+              else:
+                  # Schema version: v1 (2024-01)
+                  # To change schema: bump version, drop and recreate (requires re-embedding).
+                  fields = [
+                      FieldSchema(name="chunk_id",      dtype=DataType.VARCHAR, max_length=64,   is_primary=True),
+                      FieldSchema(name="url",            dtype=DataType.VARCHAR, max_length=2048),
+                      FieldSchema(name="chunk_index",    dtype=DataType.INT64),
+                      FieldSchema(name="total_chunks",   dtype=DataType.INT64),
+                      FieldSchema(name="text",           dtype=DataType.VARCHAR, max_length=4096),
+                      FieldSchema(name="content_hash",   dtype=DataType.VARCHAR, max_length=64),
+                      FieldSchema(name="created_at",     dtype=DataType.INT64),
+                      FieldSchema(name="embedding",      dtype=DataType.FLOAT_VECTOR, dim=dim),
+                  ]
+                  schema = CollectionSchema(fields=fields, description="RAG pipeline chunks v1")
+                  col = Collection(name=collection_name, schema=schema)
+                  print(f"collection '{collection_name}' created")
+
+                  # IVF_FLAT: good recall at <500K vectors, fast build time.
+                  # Switch to HNSW at >500K vectors for better ANN speed.
+                  index_params = {
+                      "metric_type": "COSINE",
+                      "index_type":  "IVF_FLAT",
+                      "params":      {"nlist": 128},
+                  }
+                  col.create_index(field_name="embedding", index_params=index_params)
+                  print("index created (IVF_FLAT, nlist=128, COSINE)")
+
+              print("milvus init complete")
+              PYEOF
+{{- end }}

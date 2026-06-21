@@ -1,0 +1,39 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: rag-pipeline
+
+nodes:
+  - role: control-plane
+    # Ingress port mappings — nginx-ingress will bind these on the host.
+    # Port 8080/8443 on host → 80/443 inside the cluster, avoiding conflicts
+    # with anything already running on the host's 80/443.
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 8443
+        protocol: TCP
+    # Label required for the nginx-ingress DaemonSet nodeSelector.
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+
+  # Two worker nodes give KEDA somewhere to schedule burst replicas
+  # without evicting infra pods (Milvus, Kafka) from the control-plane.
+  - role: worker
+  - role: worker
+
+# Use a recent stable Kubernetes version.
+# Pin to a specific image digest in production to avoid surprise upgrades.
+# https://github.com/kubernetes-sigs/kind/releases
+# kind get images  ←  lists locally cached images
+networking:
+  # Disable default CNI so we can use the kind default (kindnet) explicitly.
+  # Change to "false" and add a CNI manifest if you want Calico/Cilium.
+  disableDefaultCNI: false
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

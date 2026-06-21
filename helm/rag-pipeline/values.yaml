@@ -10,11 +10,18 @@ global:
   imageRegistry: ""         # set to your registry prefix, e.g. "ghcr.io/yourorg"
   imagePullSecrets: []
 
+createNamespace: false    # set true if deploying without --create-namespace flag
+
 kafka:
-  # Kafka is deployed via a Strimzi Kafka CR (not a Helm subchart).
-  # The CR is in helm/rag-pipeline/charts/kafka/templates/kafka-cluster.yaml.
-  # The Strimzi operator must be installed separately before deploying this chart.
+  # Kafka is deployed via a Strimzi Kafka CR managed by this chart.
+  # The Strimzi operator must be pre-installed (see scripts/setup-local.sh).
+  enabled: true
+  version: "3.7.0"
+  replicas: 1               # 1 for local dev; ≥3 for production
   bootstrapServers: "kafka-cluster-kafka-bootstrap:9092"
+  # topicPartitions: base partition count. chunk.ready gets 2x this value.
+  # 3 partitions = up to 3 parallel chunker replicas can consume concurrently.
+  topicPartitions: 3
   topics:
     pageCrawled: page.crawled
     chunkReady: chunk.ready
@@ -184,3 +191,11 @@ keda:
     maxReplicaCount: 8
     lagThreshold: 10          # embedding is the bottleneck; allow more lag per replica
     cooldownPeriod: 180       # longer cooldown — model load time is ~10s, don't thrash
+
+# ---------------------------------------------------------------------------
+# Milvus init job settings
+# ---------------------------------------------------------------------------
+milvusInitJob:
+  milvusHost: milvus-milvus   # service name from the Milvus Helm chart
+  milvusPort: "19530"
+  embeddingDim: "384"         # all-MiniLM-L6-v2 output dimension

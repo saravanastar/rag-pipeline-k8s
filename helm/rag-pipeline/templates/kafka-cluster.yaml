@@ -1,0 +1,47 @@
+{{- if .Values.kafka.enabled }}
+# Strimzi Kafka cluster — single-node, no TLS, plaintext only.
+# Suitable for local kind dev. For production: replicas ≥ 3, TLS listeners,
+# persistent storage with a real StorageClass, and separate ZooKeeper nodes.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: kafka-cluster
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  kafka:
+    version: {{ .Values.kafka.version }}
+    replicas: {{ .Values.kafka.replicas }}
+    listeners:
+      # Plain (no auth, no TLS) listener — fine for in-cluster traffic on a local dev cluster.
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      # Retain messages for 24h — long enough to survive an embedding-service outage
+      # without losing chunks, short enough to not fill local storage.
+      log.retention.hours: 24
+      # Reduce replica factors to 1 for local single-node cluster.
+      # Must match the topic-level replication.factor settings below.
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+    storage:
+      type: ephemeral
+      # ephemeral = emptyDir; data is lost on pod restart.
+      # Acceptable for local dev (crawl re-runs restore the topic).
+      # Switch to `type: persistent-claim` with a PVC for staging/prod.
+  zookeeper:
+    replicas: 1
+    storage:
+      type: ephemeral
+  entityOperator:
+    # The entity operator manages KafkaTopic and KafkaUser CRs automatically.
+    topicOperator: {}
+    userOperator: {}
+{{- end }}
