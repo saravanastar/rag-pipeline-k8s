@@ -115,21 +115,19 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 step "Helm install/upgrade"
 info "Deploying release '$RELEASE_NAME' into namespace '$NAMESPACE' ..."
 
-# Milestone 3: crawler enabled. Chunker/embedding/query enabled in later milestones.
+# Milestone 4: crawler + chunker enabled. Embedding/query enabled in later milestones.
 helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/rag-pipeline" \
   --namespace "$NAMESPACE" \
   --values "$REPO_ROOT/helm/rag-pipeline/values.yaml" \
-  --set chunker.enabled=false \
   --set embeddingService.enabled=false \
   --set queryApi.enabled=false \
   --wait \
   --timeout 300s
 
 # ── 9. Apply KEDA ScaledObjects ──────────────────────────────────────────────
-# (Skipped in milestone 2 — no app deployments to scale yet.
-#  Uncomment when milestone 4 is complete.)
-# step "KEDA ScaledObjects"
-# kubectl apply -f "$REPO_ROOT/k8s/keda/" -n "$NAMESPACE"
+step "KEDA ScaledObjects"
+# Apply chunker ScaledObject. Embedding ScaledObject activates in milestone 5.
+kubectl apply -f "$REPO_ROOT/k8s/keda/chunker-scaledobject.yaml" -n "$NAMESPACE"
 
 # ── 10. Health check ─────────────────────────────────────────────────────────
 step "Health check"

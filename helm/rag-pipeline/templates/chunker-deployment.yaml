@@ -1,0 +1,90 @@
+{{- if .Values.chunker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chunker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: chunker
+    app.kubernetes.io/component: chunker
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  # replicaCount is the initial value. KEDA's ScaledObject will override this
+  # dynamically based on page.crawled consumer lag. Set to 1 (not 0) so the
+  # deployment is always running when KEDA isn't installed yet (local dev / CI).
+  replicas: {{ .Values.chunker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chunker
+  strategy:
+    # RollingUpdate: KEDA scales up new replicas before terminating old ones.
+    # maxUnavailable=0 ensures consumer lag doesn't spike during a deploy.
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chunker
+        app.kubernetes.io/component: chunker
+      annotations:
+        # Force pod restart when values change (env vars, chunk size, etc.)
+        checksum/config: {{ .Values.chunker.config | toJson | sha256sum }}
+    spec:
+      # Give in-flight chunking + Kafka flush time to complete on SIGTERM.
+      # Default is 30s; 60s is generous for a single-page batch.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: chunker
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.chunker.image.repository }}:{{ .Values.chunker.image.tag }}"
+          imagePullPolicy: {{ .Values.chunker.image.pullPolicy }}
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: {{ .Values.kafka.bootstrapServers | quote }}
+            - name: KAFKA_TOPIC_IN
+              value: {{ .Values.kafka.topics.pageCrawled | quote }}
+            - name: KAFKA_TOPIC_OUT
+              value: {{ .Values.kafka.topics.chunkReady | quote }}
+            - name: KAFKA_CONSUMER_GROUP
+              value: {{ .Values.chunker.config.kafkaConsumerGroup | quote }}
+            - name: CHUNK_SIZE_TOKENS
+              value: {{ .Values.chunker.config.chunkSizeTokens | quote }}
+            - name: CHUNK_OVERLAP_TOKENS
+              value: {{ .Values.chunker.config.chunkOverlapTokens | quote }}
+            - name: PROMETHEUS_PORT
+              value: "9090"
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              cpu: {{ .Values.chunker.resources.requests.cpu }}
+              memory: {{ .Values.chunker.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.chunker.resources.limits.cpu }}
+              memory: {{ .Values.chunker.resources.limits.memory }}
+          # Liveness: restart the pod if the metrics server stops responding.
+          # The chunker is a blocking consumer loop; if it deadlocks, the HTTP
+          # server will also stop, so this probe catches both cases.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          # Readiness: only send traffic (for metrics scraping) once the server is up.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      {{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.global.imagePullSecrets | nindent 8 }}
+      {{- end }}
+{{- end }}
