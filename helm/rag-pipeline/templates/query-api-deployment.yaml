@@ -1,0 +1,141 @@
+{{- if .Values.queryApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: query-api
+    app.kubernetes.io/component: query-api
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.queryApi.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: query-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Keep existing replicas fully available during a rollout.
+      # query-api is the user-facing endpoint; downtime is visible.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: query-api
+        app.kubernetes.io/component: query-api
+      annotations:
+        checksum/config: {{ .Values.queryApi.config | toJson | sha256sum }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: query-api
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.queryApi.image.repository }}:{{ .Values.queryApi.image.tag }}"
+          imagePullPolicy: {{ .Values.queryApi.image.pullPolicy }}
+          env:
+            - name: EMBEDDING_SERVICE_URL
+              value: {{ printf "http://embedding-service.%s.svc.cluster.local:8000" .Release.Namespace | quote }}
+            - name: MILVUS_HOST
+              value: {{ .Values.milvusInitJob.milvusHost | quote }}
+            - name: MILVUS_PORT
+              value: {{ .Values.milvusInitJob.milvusPort | quote }}
+            - name: MILVUS_COLLECTION
+              value: {{ .Values.queryApi.config.milvusCollection | quote }}
+            - name: DEFAULT_TOP_K
+              value: {{ .Values.queryApi.config.defaultTopK | quote }}
+            - name: MILVUS_NPROBE
+              value: {{ .Values.queryApi.config.milvusNprobe | default "16" | quote }}
+            - name: PROMETHEUS_PORT
+              value: "9090"
+            - name: API_PORT
+              value: "8000"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              cpu: {{ .Values.queryApi.resources.requests.cpu }}
+              memory: {{ .Values.queryApi.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.queryApi.resources.limits.cpu }}
+              memory: {{ .Values.queryApi.resources.limits.memory }}
+          # /health checks both embedding-service and Milvus reachability.
+          # A replica is not ready until both upstream dependencies respond.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 2
+      {{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.global.imagePullSecrets | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: query-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: query-api
+    app.kubernetes.io/component: query-api
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  selector:
+    app.kubernetes.io/name: query-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+---
+{{- if .Values.queryApi.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: query-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: query-api
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    {{- with .Values.queryApi.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: {{ .Values.queryApi.ingress.host | quote }}
+      http:
+        paths:
+          # Rewrite /api/query → /query so the FastAPI router sees the right path.
+          # External callers use /api/query; internal calls use /query directly.
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: query-api
+                port:
+                  name: http
+{{- end }}
+{{- end }}

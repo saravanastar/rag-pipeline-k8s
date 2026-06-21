@@ -115,11 +115,10 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 step "Helm install/upgrade"
 info "Deploying release '$RELEASE_NAME' into namespace '$NAMESPACE' ..."
 
-# Milestone 5: crawler + chunker + embedding-service enabled. Query API in milestone 6.
+# Full stack — all components enabled from milestone 6 onward.
 helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/rag-pipeline" \
   --namespace "$NAMESPACE" \
   --values "$REPO_ROOT/helm/rag-pipeline/values.yaml" \
-  --set queryApi.enabled=false \
   --wait \
   --timeout 300s
 

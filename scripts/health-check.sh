@@ -118,6 +118,17 @@ else
   warn "Check: kubectl logs job/milvus-init -n $NAMESPACE"
 fi
 
+# ── Query API ─────────────────────────────────────────────────────────────────
+section "Query API"
+
+QUERY_READY=$(kubectl get deployment query-api -n "$NAMESPACE" \
+  -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+if [[ "${QUERY_READY}" == "0" ]] || [[ -z "${QUERY_READY}" ]]; then
+  warn "query-api deployment not found or not ready — skipping (may not be deployed yet)"
+else
+  pass "query-api deployment has ${QUERY_READY} ready replica(s)"
+fi
+
 # ── KEDA ─────────────────────────────────────────────────────────────────────
 section "KEDA operator"
 

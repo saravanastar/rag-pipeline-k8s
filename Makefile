@@ -54,11 +54,10 @@ helm-diff: ## Show diff between running release and local chart (requires helm-d
 	  --values $(HELM_CHART)/values.yaml
 
 .PHONY: deploy-infra
-deploy-infra: helm-deps ## Deploy infra + crawler + chunker + embedding-service. Query API in milestone 6.
+deploy-infra: helm-deps ## Deploy/upgrade the full stack (all milestones)
 	helm upgrade --install $(RELEASE) $(HELM_CHART) \
 	  --namespace $(NAMESPACE) --create-namespace \
 	  --values $(HELM_CHART)/values.yaml \
-	  --set queryApi.enabled=false \
 	  --wait --timeout 300s
 	kubectl apply -f $(KEDA_MANIFESTS)/ -n $(NAMESPACE)
 
@@ -111,6 +110,26 @@ logs-redis: ## Tail Redis logs
 .PHONY: crawl
 crawl: ## Trigger a one-off crawl job from the CronJob spec
 	kubectl create job --from=cronjob/crawler manual-crawl-$(shell date +%s) -n $(NAMESPACE)
+
+.PHONY: query
+query: ## Run a test query against the local query-api (requires port-query to be running)
+	@curl -s -X POST http://localhost:8000/query \
+	  -H "Content-Type: application/json" \
+	  -d '{"text": "how does a Kubernetes pod restart policy work", "top_k": 3}' | python3 -m json.tool
+
+.PHONY: smoke-test
+smoke-test: ## End-to-end smoke test: trigger crawl, wait, run query
+	@echo "Triggering crawl..."
+	kubectl create job --from=cronjob/crawler smoke-test-$(shell date +%s) -n $(NAMESPACE)
+	@echo "Waiting 60s for crawl + chunk + embed pipeline to run..."
+	@sleep 60
+	@echo "Running test query via port-forward..."
+	@kubectl port-forward svc/query-api 8000:8000 -n $(NAMESPACE) &
+	@sleep 2
+	@curl -s -X POST http://localhost:8000/query \
+	  -H "Content-Type: application/json" \
+	  -d '{"text": "what is a Kubernetes deployment", "top_k": 3}' | python3 -m json.tool
+	@pkill -f "kubectl port-forward svc/query-api" || true
 
 # ── Port-forwarding shortcuts ─────────────────────────────────────────────────
 

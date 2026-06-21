@@ -165,6 +165,7 @@ queryApi:
   config:
     defaultTopK: 5
     milvusCollection: rag_chunks
+    milvusNprobe: 16            # IVF cells to probe: 16/128 ≈ 12.5%, good recall at <500K vectors
   resources:
     requests:
       cpu: 100m
