@@ -52,6 +52,11 @@ fi
 kubectl config use-context "kind-${CLUSTER_NAME}"
 info "kubectl context: $(kubectl config current-context)"
 
+# Create the app namespace immediately — Strimzi references it during install
+# (it creates RoleBindings in the watched namespace). Must exist before step 4.
+kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+info "namespace '$NAMESPACE' ready"
+
 # ── 2. Install nginx-ingress (for query-api) ─────────────────────────────────
 step "nginx Ingress controller"
 if kubectl get namespace ingress-nginx &>/dev/null; then
@@ -129,10 +134,6 @@ helm repo update
 # ── 6b. Update umbrella chart dependencies ───────────────────────────────────
 step "Helm dependency update"
 helm dependency update "$REPO_ROOT/helm/rag-pipeline"
-
-# ── 7. Create namespace ──────────────────────────────────────────────────────
-step "Namespace"
-kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
 # ── 8. Deploy the umbrella chart ─────────────────────────────────────────────
 step "Helm install/upgrade"
