@@ -145,18 +145,40 @@ port-redis: ## Forward Redis to localhost:6379
 port-query: ## Forward query-api to localhost:8000
 	kubectl port-forward svc/query-api 8000:8000 -n $(NAMESPACE)
 
+.PHONY: metallb
+metallb: ## Install MetalLB so LoadBalancer Services get real IPs (no port-forward needed)
+	@chmod +x scripts/install-metallb.sh
+	./scripts/install-metallb.sh
+	@echo ""
+	@echo "Patch Grafana + Prometheus to LoadBalancer so you can hit them directly:"
+	kubectl patch svc kube-prometheus-stack-grafana \
+	  -n monitoring -p '{"spec":{"type":"LoadBalancer"}}'
+	kubectl patch svc kube-prometheus-stack-prometheus \
+	  -n monitoring -p '{"spec":{"type":"LoadBalancer"}}'
+	@echo ""
+	@echo "IPs assigned:"
+	@kubectl get svc kube-prometheus-stack-grafana kube-prometheus-stack-prometheus \
+	  -n monitoring --no-headers | awk '{print $$1, $$4, $$5}'
+
+.PHONY: ips
+ips: ## Show all LoadBalancer IPs in the cluster
+	@echo "\n── LoadBalancer services ──"
+	@kubectl get svc -A --field-selector spec.type=LoadBalancer \
+	  -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,EXTERNAL-IP:.status.loadBalancer.ingress[0].ip,PORT:.spec.ports[*].port'
+
 .PHONY: port-prometheus
-port-prometheus: ## Forward Prometheus UI to localhost:9090 (http://localhost:9090)
+port-prometheus: ## Forward Prometheus UI to localhost:9090 (fallback if MetalLB not installed)
 	kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 -n monitoring
 
 .PHONY: port-grafana
-port-grafana: ## Forward Grafana to localhost:3000 (admin/admin)
+port-grafana: ## Forward Grafana to localhost:3000 (fallback if MetalLB not installed)
 	kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring
 
 .PHONY: import-dashboard
-import-dashboard: ## Import the RAG pipeline Grafana dashboard via the API
-	@echo "Importing dashboard (requires port-grafana to be running) ..."
-	@curl -s -X POST http://admin:admin@localhost:3000/api/dashboards/import \
+import-dashboard: ## Import the RAG pipeline Grafana dashboard (set GRAFANA_URL if using LB IP)
+	$(eval GRAFANA_URL ?= http://localhost:3000)
+	@echo "Importing dashboard to $(GRAFANA_URL) ..."
+	@curl -s -X POST admin:admin@$(GRAFANA_URL)/api/dashboards/import \
 	  -H "Content-Type: application/json" \
 	  -d "{\"dashboard\": $$(cat dashboards/rag-pipeline-grafana.json), \"overwrite\": true, \"folderId\": 0}" \
 	  | python3 -m json.tool
