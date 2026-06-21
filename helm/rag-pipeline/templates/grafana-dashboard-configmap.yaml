@@ -1,0 +1,25 @@
+{{- if .Values.monitoring.enabled }}
+# kube-prometheus-stack ships a Grafana sidecar that watches ConfigMaps
+# labelled grafana_dashboard=1 and auto-imports them without a restart.
+# This ConfigMap embeds the full RAG pipeline dashboard JSON.
+#
+# After deploying, the dashboard appears in Grafana under:
+#   Dashboards → Browse → RAG Pipeline
+#
+# To import manually instead: make port-grafana → make import-dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-pipeline-grafana-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  annotations:
+    # Grafana sidecar respects this annotation to place the dashboard in a folder.
+    grafana_folder: "RAG Pipeline"
+data:
+  rag-pipeline.json: |
+    {{- .Files.Get "dashboards/rag-pipeline-grafana.json" | indent 4 }}
+{{- end }}
