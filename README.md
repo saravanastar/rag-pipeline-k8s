@@ -261,6 +261,8 @@ rag-pipeline-k8s/
 
 ## Quick start
 
+> **Full guide with all make commands and troubleshooting:** [RUNNING_LOCALLY.md](RUNNING_LOCALLY.md)
+
 ### Prerequisites
 
 ```bash
