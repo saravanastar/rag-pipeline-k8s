@@ -159,8 +159,28 @@ Then query directly on port 8080:
 ```bash
 curl -s http://rag.local:8080/api/query \
   -H "Content-Type: application/json" \
-  -d '{"text": "how does a Kubernetes pod restart policy work", "top_k": 5}' \
+  -d '{"text": "how does OAuth2 authentication work in FastAPI", "top_k": 3}' \
   | python3 -m json.tool
+```
+
+Expected response (results will vary by crawl batch):
+
+```json
+{
+    "results": [
+        {
+            "chunk_id": "eca8500d-a38d-43e4-82cf-a98a33e4b048",
+            "url": "https://fastapi.tiangolo.com/tutorial/security/first-steps/",
+            "title": "Security - First Steps - FastAPI",
+            "chunk_index": 0,
+            "total_chunks": 5,
+            "text": "Security - First Steps ... Let's imagine that you have your backend API in some domain ...",
+            "score": 0.91
+        }
+    ],
+    "query_latency_ms": 219.7,
+    "result_count": 3
+}
 ```
 
 ### Option B — via port-forward
