@@ -16,8 +16,8 @@ kafka:
   # Kafka is deployed via a Strimzi Kafka CR managed by this chart.
   # The Strimzi operator must be pre-installed (see scripts/setup-local.sh).
   enabled: true
-  version: "3.9.0"
-  metadataVersion: "3.9-IV0"   # KRaft metadata version; must match Kafka version
+  version: "4.2.0"
+  metadataVersion: "4.2-IV0"   # KRaft metadata version; must match Kafka version
   replicas: 1               # 1 for local dev; ≥3 for production
   bootstrapServers: "kafka-cluster-kafka-bootstrap:9092"
   # topicPartitions: base partition count. chunk.ready gets 2x this value.
@@ -34,7 +34,12 @@ redis:
   enabled: true
   architecture: standalone
   auth:
-    enabled: false          # no auth for local dev; enable in prod
+    enabled: false
+  image:
+    registry: docker.io
+    repository: redis
+    tag: "7"
+    pullPolicy: IfNotPresent
   master:
     resources:
       requests:
@@ -46,12 +51,8 @@ redis:
     persistence:
       enabled: true
       size: 1Gi
-  # redis_exporter sidecar — exposes Redis INFO metrics on :9121/metrics.
-  # Scraped by the redis ServiceMonitor below.
   metrics:
-    enabled: true
-    serviceMonitor:
-      enabled: false    # we manage the ServiceMonitor ourselves for label consistency
+    enabled: false   # disabled: bitnami/redis-exporter image unavailable on Docker Hub
 
 # ---------------------------------------------------------------------------
 # Milvus (official Helm chart)
@@ -60,6 +61,13 @@ milvus:
   enabled: true
   cluster:
     enabled: false          # standalone mode for local dev
+  # Disable Pulsar — standalone Milvus uses RocksMQ (embedded, no extra pods)
+  pulsar:
+    enabled: false
+  pulsarv3:
+    enabled: false
+  kafka:
+    enabled: false          # Milvus internal kafka (not our app Kafka)
   standalone:
     resources:
       requests:
@@ -83,6 +91,8 @@ milvus:
         cpu: 500m
         memory: 256Mi
   minio:
+    mode: standalone          # 1 pod instead of 4; fine for local dev
+    replicas: 1
     resources:
       requests:
         cpu: 100m
@@ -97,12 +107,12 @@ milvus:
 crawler:
   enabled: true
   image:
-    repository: rag-pipeline/crawler
+    repository: localhost:5001/crawler
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   schedule: "0 */6 * * *"    # every 6 hours
   config:
-    targetSitemapUrl: "https://kubernetes.io/sitemap.xml"
+    targetSitemapUrl: "https://kubernetes.io/en/sitemap.xml"
     sitemapUrlFilter: "/docs/concepts/"
     crawlDelaySeconds: 1
     maxPages: 500               # hard cap per run; prevents sitemap explosion in local dev
@@ -120,9 +130,9 @@ crawler:
 chunker:
   enabled: true
   image:
-    repository: rag-pipeline/chunker
+    repository: localhost:5001/chunker
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   replicaCount: 1             # KEDA will override this; set as floor
   config:
     chunkSizeTokens: 512
@@ -142,9 +152,9 @@ chunker:
 embeddingService:
   enabled: true
   image:
-    repository: rag-pipeline/embedding-service
+    repository: localhost:5001/embedding-service
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   replicaCount: 1             # KEDA will override; set as floor
   config:
     modelName: all-MiniLM-L6-v2   # any sentence-transformers model name
@@ -166,9 +176,9 @@ embeddingService:
 queryApi:
   enabled: true
   image:
-    repository: rag-pipeline/query-api
+    repository: localhost:5001/query-api
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   replicaCount: 2
   config:
     defaultTopK: 5
@@ -198,7 +208,7 @@ keda:
     cooldownPeriod: 120       # seconds; conservative to avoid thrash on bursty crawl batches
   embeddingService:
     minReplicaCount: 0
-    maxReplicaCount: 8
+    maxReplicaCount: 2   # local dev: raise to 8 in prod; each replica loads ~200MB model
     lagThreshold: 10          # embedding is the bottleneck; allow more lag per replica
     cooldownPeriod: 180       # longer cooldown — model load time is ~10s, don't thrash
 
@@ -229,7 +239,7 @@ monitoring:
 # Milvus init job settings
 # ---------------------------------------------------------------------------
 milvusInitJob:
-  milvusHost: milvus-milvus   # service name from the Milvus Helm chart
+  milvusHost: rag-milvus   # service name: {release}-milvus (release name is "rag")
   milvusPort: "19530"
   # embeddingDim is intentionally read from embeddingService.config.embeddingDim
   # so there is a single source of truth — do not set it here.

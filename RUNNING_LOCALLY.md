@@ -54,18 +54,24 @@ make setup
 
 ---
 
-## Step 2 — Build and load app images
+## Step 2 — Start the local registry
 
-The app services (crawler, chunker, embedding-service, query-api) are built from
-local Dockerfiles. For a kind cluster no registry is needed — images are loaded
-directly into the cluster nodes.
+A local Docker registry lets kind nodes pull images over the Docker bridge
+instead of receiving slow tarball copies via `kind load`. Do this once per
+machine (the registry container persists across cluster restarts).
 
 ```bash
-make build-and-load
+make registry
 ```
 
-This runs `docker build` for each service then `kind load docker-image` to inject
-them into the cluster. Pods in `ImagePullBackOff` will self-heal within a minute.
+## Step 3 — Build and push app images
+
+```bash
+make build-and-push
+```
+
+This builds all four services and pushes them to `localhost:5001`. Nodes pull
+on demand — much faster than `kind load` for large images.
 
 > **Note:** `embedding-service` downloads the `all-MiniLM-L6-v2` model (~90 MB)
 > during build and bakes it into the image. First build takes 3–5 minutes.
@@ -73,13 +79,14 @@ them into the cluster. Pods in `ImagePullBackOff` will self-heal within a minute
 
 | Command | What it does |
 |---|---|
-| `make build` | Build all four images locally |
-| `make load-images` | Load already-built images into kind (no rebuild) |
-| `make build-and-load` | Build + load in one step |
+| `make registry` | Start local registry + wire into kind cluster (run once) |
+| `make build` | Build all four images and tag for local registry |
+| `make push-images` | Push already-built images to local registry |
+| `make build-and-push` | Build + push in one step |
 
 ---
 
-## Step 3 — Verify everything is up
+## Step 4 — Verify everything is up
 
 
 ```bash
@@ -108,7 +115,7 @@ embedding-service   Deployment        0     8     True
 
 ---
 
-## Step 4 — Trigger a crawl
+## Step 5 — Trigger a crawl
 
 ```bash
 make crawl
@@ -137,7 +144,7 @@ see `skipped=190 emitted=3` style output.
 
 ---
 
-## Step 5 — Query the pipeline
+## Step 6 — Query the pipeline
 
 ### Option A — via Ingress (recommended, no port-forward)
 
@@ -166,7 +173,7 @@ make query             # fires a sample question and pretty-prints the response
 
 ---
 
-## Step 6 — Observe in Grafana
+## Step 7 — Observe in Grafana
 
 ### Option A — MetalLB (recommended, gives a real IP)
 
@@ -216,6 +223,15 @@ Run `make help` at any time to see this list.
 | `make cluster-create` | Create the kind cluster only. |
 | `make cluster-delete` | Delete the kind cluster (destroys all data). |
 | `make cluster-reset` | Delete + recreate the cluster from scratch. |
+
+### Images
+
+| Command | What it does |
+|---|---|
+| `make registry` | Start a local Docker registry and wire it into kind (run once). |
+| `make build` | Build all four app images, tagged for the local registry. |
+| `make push-images` | Push already-built images to the local registry. |
+| `make build-and-push` | Build + push in one step (most common after code changes). |
 
 ### Deploy
 

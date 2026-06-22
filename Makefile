@@ -107,25 +107,32 @@ logs-redis: ## Tail Redis logs
 
 # ── Image build + kind load ───────────────────────────────────────────────────
 
-IMAGE_PREFIX := rag-pipeline
-IMAGE_TAG    := latest
+IMAGE_PREFIX  := rag-pipeline
+IMAGE_TAG     := latest
+REGISTRY      := localhost:5001
+REGISTRY_NAME := kind-registry
+
+.PHONY: registry
+registry: ## Start a local Docker registry and wire it into the kind cluster
+	@chmod +x scripts/setup-registry.sh
+	CLUSTER_NAME=$(CLUSTER_NAME) ./scripts/setup-registry.sh
 
 .PHONY: build
 build: ## Build all app Docker images locally
-	docker build -t $(IMAGE_PREFIX)/crawler:$(IMAGE_TAG)           crawler/
-	docker build -t $(IMAGE_PREFIX)/chunker:$(IMAGE_TAG)           chunker/
-	docker build -t $(IMAGE_PREFIX)/embedding-service:$(IMAGE_TAG) embedding-service/
-	docker build -t $(IMAGE_PREFIX)/query-api:$(IMAGE_TAG)         query-api/
+	docker build -t $(REGISTRY)/crawler:$(IMAGE_TAG)           crawler/
+	docker build -t $(REGISTRY)/chunker:$(IMAGE_TAG)           chunker/
+	docker build -t $(REGISTRY)/embedding-service:$(IMAGE_TAG) embedding-service/
+	docker build -t $(REGISTRY)/query-api:$(IMAGE_TAG)         query-api/
 
-.PHONY: load-images
-load-images: ## Load locally-built images into the kind cluster (no registry needed)
-	kind load docker-image $(IMAGE_PREFIX)/crawler:$(IMAGE_TAG)           --name $(CLUSTER_NAME)
-	kind load docker-image $(IMAGE_PREFIX)/chunker:$(IMAGE_TAG)           --name $(CLUSTER_NAME)
-	kind load docker-image $(IMAGE_PREFIX)/embedding-service:$(IMAGE_TAG) --name $(CLUSTER_NAME)
-	kind load docker-image $(IMAGE_PREFIX)/query-api:$(IMAGE_TAG)         --name $(CLUSTER_NAME)
+.PHONY: push-images
+push-images: ## Push locally-built images to the local registry (fast — no tarball copy)
+	docker push $(REGISTRY)/crawler:$(IMAGE_TAG)
+	docker push $(REGISTRY)/chunker:$(IMAGE_TAG)
+	docker push $(REGISTRY)/embedding-service:$(IMAGE_TAG)
+	docker push $(REGISTRY)/query-api:$(IMAGE_TAG)
 
-.PHONY: build-and-load
-build-and-load: build load-images ## Build images and load them into kind
+.PHONY: build-and-push
+build-and-push: build push-images ## Build images and push to local registry
 
 # ── Manual crawl trigger ──────────────────────────────────────────────────────
 

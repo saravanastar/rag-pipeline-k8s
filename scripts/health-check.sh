@@ -21,8 +21,8 @@ done
 GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
 PASS=0; FAIL=0
 
-pass() { echo -e "  ${GREEN}✓${NC} $*"; (( PASS++ )); }
-fail() { echo -e "  ${RED}✗${NC} $*"; (( FAIL++ )); }
+pass() { echo -e "  ${GREEN}✓${NC} $*"; PASS=$(( PASS + 1 )); }
+fail() { echo -e "  ${RED}✗${NC} $*"; FAIL=$(( FAIL + 1 )); }
 warn() { echo -e "  ${YELLOW}~${NC} $*"; }
 section() { echo -e "\n${YELLOW}▸ $*${NC}"; }
 
@@ -72,35 +72,34 @@ else
   warn "Check: kubectl describe statefulset rag-redis-master -n $NAMESPACE"
 fi
 
-# Ping Redis via a one-shot pod
-REDIS_PING=$(kubectl run redis-ping-test \
-  --image=redis:7-alpine \
-  --restart=Never \
-  --rm \
-  --quiet \
-  --namespace "$NAMESPACE" \
-  -it \
-  -- redis-cli -h rag-redis-master PING 2>/dev/null | tr -d '[:space:]' || echo "FAIL")
-if [[ "$REDIS_PING" == "PONG" ]]; then
-  pass "Redis PING → PONG (connection OK)"
+# Ping Redis via exec into the running pod (avoids kubectl run TTY noise)
+REDIS_POD=$(kubectl get pod -n "$NAMESPACE" -l app.kubernetes.io/name=redis \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [[ -n "$REDIS_POD" ]]; then
+  REDIS_PING=$(kubectl exec -n "$NAMESPACE" "$REDIS_POD" -- redis-cli PING 2>/dev/null | tr -d '[:space:]' || echo "FAIL")
+  if [[ "$REDIS_PING" == "PONG" ]]; then
+    pass "Redis PING → PONG (connection OK)"
+  else
+    fail "Redis PING failed (got: '${REDIS_PING}')"
+  fi
 else
-  fail "Redis PING failed (got: '${REDIS_PING}')"
+  fail "Redis pod not found — cannot ping"
 fi
 
 # ── Milvus ───────────────────────────────────────────────────────────────────
 section "Milvus"
 
-MILVUS_READY=$(kubectl get deployment milvus-milvus -n "$NAMESPACE" \
+MILVUS_READY=$(kubectl get deployment rag-milvus-standalone -n "$NAMESPACE" \
   -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
 if [[ "${MILVUS_READY}" -ge 1 ]]; then
   pass "Milvus deployment has ${MILVUS_READY} ready replica(s)"
 else
   fail "Milvus deployment not ready (readyReplicas=${MILVUS_READY})"
-  warn "Check: kubectl describe deployment milvus-milvus -n $NAMESPACE"
+  warn "Check: kubectl describe deployment rag-milvus-standalone -n $NAMESPACE"
   warn "Logs:  kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=milvus"
 fi
 
-MILVUS_SVC=$(kubectl get svc milvus-milvus -n "$NAMESPACE" \
+MILVUS_SVC=$(kubectl get svc rag-milvus -n "$NAMESPACE" \
   -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
 if [[ -n "$MILVUS_SVC" ]]; then
   pass "Milvus service exists (ClusterIP: $MILVUS_SVC)"

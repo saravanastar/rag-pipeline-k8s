@@ -11,14 +11,15 @@ metadata:
     # post-install + post-upgrade: runs on fresh install AND when collection schema changes.
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "5"
-    # keep-last-1: leaves the most recent job pod for log inspection, deletes older ones.
     helm.sh/hook-delete-policy: before-hook-creation
+    # Do not block helm --wait on this job; Milvus may take >5min to initialize
+    helm.sh/hook-completion-timeout: "600s"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   # Retry up to 3 times — Milvus may not be ready immediately after the hook fires.
-  backoffLimit: 3
+  backoffLimit: 5
   template:
     spec:
       restartPolicy: OnFailure
@@ -51,7 +52,7 @@ spec:
             - sh
             - -c
             - |
-              pip install pymilvus==2.4.0 --quiet
+              pip install "pymilvus==2.5.3" "setuptools>=70,<81" "marshmallow==3.22.0" --quiet
               python3 - <<'PYEOF'
               import os, time
               from pymilvus import connections, Collection, CollectionSchema, FieldSchema, DataType, utility

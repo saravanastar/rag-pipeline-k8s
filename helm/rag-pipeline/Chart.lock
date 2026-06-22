@@ -1,9 +1,9 @@
 dependencies:
 - name: redis
   repository: https://charts.bitnami.com/bitnami
-  version: 18.19.4
+  version: 20.13.4
 - name: milvus
   repository: https://zilliztech.github.io/milvus-helm
   version: 4.2.58
-digest: sha256:30807af7ae86a2ff78883e40d59aca1519d8ca47716f1410552244649eaf7851
-generated: "2026-06-20T23:50:56.060525-04:00"
+digest: sha256:3d68d3acff3065320c42cbe1851b9b99158f0279057cc244c3c50ecaf433c043
+generated: "2026-06-21T00:43:01.036066-04:00"

@@ -10,7 +10,7 @@ spec:
   # Scale to zero when the chunk.ready topic is empty.
   # Between crawl windows, the embedding service uses no resources.
   minReplicaCount: 0
-  maxReplicaCount: 8
+  maxReplicaCount: 2   # local dev: each replica loads ~200MB model; 2 is enough for kind
 
   # Longer cooldown than the chunker: model load (~10s) means spinning up a new
   # replica has overhead. We'd rather keep replicas warm for a few extra minutes

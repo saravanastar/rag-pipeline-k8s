@@ -145,6 +145,29 @@ else
   # the Helm release label. Required when app monitors are in a different namespace.
 fi
 
+# ── 6. Local registry + app images ───────────────────────────────────────────
+# Images must exist in the registry before Helm deploys (pods fail ImagePullBackOff
+# if the registry is empty when the Deployment rolls out).
+step "Local image registry"
+chmod +x "$REPO_ROOT/scripts/setup-registry.sh"
+CLUSTER_NAME="$CLUSTER_NAME" "$REPO_ROOT/scripts/setup-registry.sh"
+
+step "Build + push app images"
+REGISTRY="localhost:5001"
+for SERVICE in crawler chunker embedding-service query-api; do
+  SRC_DIR="$REPO_ROOT/$SERVICE"
+  IMAGE="$REGISTRY/$SERVICE:latest"
+  # Only build if no image exists yet; re-run 'make build-and-push' to force rebuild.
+  if docker image inspect "$IMAGE" &>/dev/null; then
+    warn "$IMAGE already built — skipping (run 'make build-and-push' to rebuild)"
+  else
+    info "Building $IMAGE ..."
+    docker build -t "$IMAGE" "$SRC_DIR"
+  fi
+  info "Pushing $IMAGE to local registry ..."
+  docker push "$IMAGE"
+done
+
 # ── 6a. Add Helm repos for app dependencies ───────────────────────────────────
 step "Helm repos"
 helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
@@ -164,7 +187,7 @@ helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/rag-pipeline" \
   --namespace "$NAMESPACE" \
   --values "$REPO_ROOT/helm/rag-pipeline/values.yaml" \
   --wait \
-  --timeout 300s
+  --timeout 600s
 
 # ── 9. Apply KEDA ScaledObjects ──────────────────────────────────────────────
 step "KEDA ScaledObjects"

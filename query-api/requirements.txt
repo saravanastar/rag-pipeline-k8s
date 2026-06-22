@@ -2,5 +2,7 @@ fastapi==0.111.1
 uvicorn[standard]==0.30.3
 pydantic==2.8.2
 requests==2.32.3
-pymilvus==2.4.4
+pymilvus==2.5.3
 prometheus-client==0.20.0
+setuptools>=70.0.0,<81.0.0
+marshmallow==3.22.0
