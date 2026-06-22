@@ -10,7 +10,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
+  {{- if not (lookup "keda.sh/v1alpha1" "ScaledObject" .Release.Namespace "embedding-service") }}
   replicas: {{ .Values.embeddingService.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: embedding-service

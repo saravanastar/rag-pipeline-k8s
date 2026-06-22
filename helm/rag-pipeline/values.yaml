@@ -112,10 +112,10 @@ crawler:
     pullPolicy: Always
   schedule: "0 */6 * * *"    # every 6 hours
   config:
-    targetSitemapUrl: "https://kubernetes.io/en/sitemap.xml"
-    sitemapUrlFilter: "/docs/concepts/"
+    targetSitemapUrl: "https://fastapi.tiangolo.com/sitemap.xml"
+    sitemapUrlFilter: ""        # take all pages; sitemap is already docs-only
     crawlDelaySeconds: 1
-    maxPages: 500               # hard cap per run; prevents sitemap explosion in local dev
+    maxPages: 50                # hard cap for local dev; ~50 FastAPI pages fits comfortably in kind
   resources:
     requests:
       cpu: 100m

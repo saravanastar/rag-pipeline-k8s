@@ -10,10 +10,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  # replicaCount is the initial value. KEDA's ScaledObject will override this
-  # dynamically based on page.crawled consumer lag. Set to 1 (not 0) so the
-  # deployment is always running when KEDA isn't installed yet (local dev / CI).
+  {{- if not (lookup "keda.sh/v1alpha1" "ScaledObject" .Release.Namespace "chunker") }}
   replicas: {{ .Values.chunker.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: chunker
